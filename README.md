@@ -141,24 +141,51 @@ const API_BASE_URL = 'http://localhost:8000/api';
 
 ## 🎯 Usage
 
-### Start the Backend Server
+### Quick Start with Startup Scripts
 
+**Option 1: Start Everything (Recommended)**
+```bash
+# macOS/Linux
+./start-all.sh
+
+# Windows
+start.bat
+```
+This opens separate terminal windows for backend and frontend automatically.
+
+**Option 2: Start Manually**
+
+Backend:
+```bash
+./start-backend.sh  # macOS/Linux
+```
+
+Frontend:
+```bash
+./start-frontend.sh  # macOS/Linux
+```
+
+### Manual Start (Alternative)
+
+**Backend**:
 ```bash
 cd backend
-source venv/bin/activate  # Activate virtual environment
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 ./venv/bin/uvicorn app.main:app --reload --port 8000
 ```
 
-Backend will be available at: `http://localhost:8000`
-
-### Start the Frontend Development Server
-
+**Frontend**:
 ```bash
 cd frontend
 npm run dev
 ```
 
-Frontend will be available at: `http://localhost:5173`
+### Access Points
+
+- **Backend API**: `http://localhost:8000`
+- **API Documentation**: `http://localhost:8000/docs`
+- **Frontend UI**: `http://localhost:5173`
+- **Health Check**: `http://localhost:8000/health`
 
 ### Using the Application
 

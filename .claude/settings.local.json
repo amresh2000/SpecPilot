@@ -10,7 +10,8 @@
       "Bash(npm install)",
       "Bash(npm run dev:*)",
       "WebSearch",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(chmod:*)"
     ],
     "deny": [],
     "ask": []

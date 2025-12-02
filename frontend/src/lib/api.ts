@@ -85,4 +85,75 @@ export const api = {
     const response = await axios.post(`${API_BASE_URL}/proceed-to-generation/${jobId}`);
     return response.data;
   },
+
+  async updateEpic(
+    jobId: string,
+    epicId: string,
+    name: string,
+    description: string
+  ): Promise<any> {
+    const formData = new FormData();
+    formData.append('name', name);
+    formData.append('description', description);
+
+    const response = await axios.put(
+      `${API_BASE_URL}/update-epic/${jobId}/${epicId}`,
+      formData,
+      {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      }
+    );
+
+    return response.data;
+  },
+
+  async updateStory(
+    jobId: string,
+    storyId: string,
+    title: string,
+    role: string,
+    goal: string,
+    benefit: string
+  ): Promise<any> {
+    const formData = new FormData();
+    formData.append('title', title);
+    formData.append('role', role);
+    formData.append('goal', goal);
+    formData.append('benefit', benefit);
+
+    const response = await axios.put(
+      `${API_BASE_URL}/update-story/${jobId}/${storyId}`,
+      formData,
+      {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      }
+    );
+
+    return response.data;
+  },
+
+  async updateAcceptanceCriteria(
+    jobId: string,
+    storyId: string,
+    criteria: string[]
+  ): Promise<any> {
+    const formData = new FormData();
+    formData.append('criteria', JSON.stringify(criteria));
+
+    const response = await axios.put(
+      `${API_BASE_URL}/update-acceptance-criteria/${jobId}/${storyId}`,
+      formData,
+      {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      }
+    );
+
+    return response.data;
+  },
 };

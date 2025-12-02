@@ -19,6 +19,10 @@ class GenerationPipeline:
         self.parser = BRDParser()
         self.llm_client = BedrockLLMClient()
 
+        # Extract applied gap fixes
+        job = job_manager.get_job(job_id)
+        self.gap_fixes = self._get_applied_gap_fixes(job)
+
     async def run(self):
         """Execute the complete generation pipeline"""
         job = job_manager.get_job(self.job_id)
@@ -97,7 +101,8 @@ class GenerationPipeline:
             # Call LLM
             result = self.llm_client.generate_epics_and_stories(
                 job.brd_data,
-                job.instructions
+                job.instructions,
+                self.gap_fixes
             )
 
             # Parse and store results
@@ -157,7 +162,8 @@ class GenerationPipeline:
             result = self.llm_client.generate_functional_tests(
                 job.results.user_stories,
                 job.instructions,
-                brd_chunks if brd_chunks else None
+                brd_chunks if brd_chunks else None,
+                self.gap_fixes
             )
 
             # Parse and store results
@@ -182,7 +188,8 @@ class GenerationPipeline:
 
             # Call LLM
             result = self.llm_client.generate_gherkin_tests(
-                job.results.user_stories
+                job.results.user_stories,
+                self.gap_fixes
             )
 
             # Parse and store results
@@ -208,7 +215,8 @@ class GenerationPipeline:
             # Call LLM
             result = self.llm_client.generate_data_model(
                 job.brd_data,
-                job.results.user_stories
+                job.results.user_stories,
+                self.gap_fixes
             )
 
             # Parse and store entities
@@ -244,7 +252,8 @@ class GenerationPipeline:
             # Call LLM
             result = self.llm_client.generate_code_skeleton(
                 job.results.project_name,
-                job.results.entities
+                job.results.entities,
+                self.gap_fixes
             )
 
             # Parse and store code skeleton
@@ -293,3 +302,24 @@ class GenerationPipeline:
                 })
 
         return tree
+
+    def _get_applied_gap_fixes(self, job):
+        """Extract gap fixes that user accepted or edited"""
+        applied = []
+        if not job or not job.results or not job.results.gap_fixes:
+            return applied
+
+        for gf in job.results.gap_fixes:
+            if gf.user_action == "accept":
+                applied.append({
+                    "type": gf.gap_type,
+                    "issue": gf.issue,
+                    "correction": gf.suggestion
+                })
+            elif gf.user_action == "edit" and gf.final_text:
+                applied.append({
+                    "type": gf.gap_type,
+                    "issue": gf.issue,
+                    "correction": gf.final_text
+                })
+        return applied

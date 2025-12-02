@@ -96,9 +96,13 @@ class BedrockLLMClient:
     def generate_epics_and_stories(
         self,
         brd_data: Dict[str, Any],
-        instructions: str
+        instructions: str,
+        gap_fixes: List[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         """Call A: BRD → project_name + epics + user stories"""
+
+        # Build gap fixes context
+        gap_fixes_text = self._build_gap_fixes_context(gap_fixes)
 
         # Prepare context from BRD
         chunks = brd_data.get('chunks', [])
@@ -130,7 +134,7 @@ BRD Content:
 {sections_text}
 
 {tables_text if tables_text else ''}
-
+{gap_fixes_text}
 Special Instructions:
 {instructions if instructions else 'None'}
 
@@ -179,9 +183,13 @@ Include source_chunks references to BRD sections where applicable.
         self,
         user_stories: List[UserStory],
         instructions: str,
-        brd_chunks: Optional[List[Dict[str, Any]]] = None
+        brd_chunks: Optional[List[Dict[str, Any]]] = None,
+        gap_fixes: List[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         """Call B: User Stories → Functional Tests"""
+
+        # Build gap fixes context
+        gap_fixes_text = self._build_gap_fixes_context(gap_fixes)
 
         stories_text = "\n\n".join([
             f"Story {s.id}: {s.title}\n"
@@ -204,7 +212,7 @@ Include source_chunks references to BRD sections where applicable.
 User Stories:
 {stories_text}
 {chunks_context}
-
+{gap_fixes_text}
 Special Instructions:
 {instructions if instructions else 'None'}
 
@@ -233,9 +241,13 @@ Each test should be detailed, specific, and cover the acceptance criteria.
 
     def generate_gherkin_tests(
         self,
-        user_stories: List[UserStory]
+        user_stories: List[UserStory],
+        gap_fixes: List[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         """Call C: User Stories → Gherkin scenarios"""
+
+        # Build gap fixes context
+        gap_fixes_text = self._build_gap_fixes_context(gap_fixes)
 
         stories_text = "\n\n".join([
             f"Story {s.id}: {s.title}\n"
@@ -249,6 +261,7 @@ Each test should be detailed, specific, and cover the acceptance criteria.
 
 User Stories:
 {stories_text}
+{gap_fixes_text}
 
 Output must be valid JSON matching this schema:
 {{
@@ -276,9 +289,13 @@ Each scenario should follow BDD best practices with clear Given/When/Then steps.
     def generate_data_model(
         self,
         brd_data: Dict[str, Any],
-        user_stories: List[UserStory]
+        user_stories: List[UserStory],
+        gap_fixes: List[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         """Call D: BRD + stories → Entities + Mermaid"""
+
+        # Build gap fixes context
+        gap_fixes_text = self._build_gap_fixes_context(gap_fixes)
 
         # Focus on data-related sections and tables
         tables_text = "\n\n".join([
@@ -296,6 +313,7 @@ BRD Tables:
 
 User Stories:
 {stories_text}
+{gap_fixes_text}
 
 Output must be valid JSON matching this schema:
 {{
@@ -326,9 +344,13 @@ Generate a Mermaid ER diagram showing entities and relationships.
     def generate_code_skeleton(
         self,
         project_name: str,
-        entities: List[Entity]
+        entities: List[Entity],
+        gap_fixes: List[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         """Call E: Entities → ASP.NET Code Skeleton"""
+
+        # Build gap fixes context
+        gap_fixes_text = self._build_gap_fixes_context(gap_fixes)
 
         entities_text = "\n".join([
             f"- {e.name}: {', '.join([f.name for f in e.fields])}"
@@ -341,6 +363,7 @@ Project Name: {project_name}
 
 Entities:
 {entities_text}
+{gap_fixes_text}
 
 Output must be valid JSON matching this schema:
 {{
@@ -564,3 +587,18 @@ If the gap is about NFRs, provide specific metrics and SLAs.
                 continue
 
         return gap_fixes
+
+    def _build_gap_fixes_context(self, gap_fixes: List[Dict[str, str]] = None) -> str:
+        """Build formatted gap fixes context for LLM prompts"""
+        if not gap_fixes or len(gap_fixes) == 0:
+            return ""
+
+        gap_fixes_text = "\n\n## BRD CORRECTIONS AND CLARIFICATIONS\n"
+        gap_fixes_text += "The following issues were identified in the BRD during validation and have been corrected:\n\n"
+
+        for i, fix in enumerate(gap_fixes, 1):
+            gap_fixes_text += f"{i}. **{fix['type']}**: {fix['issue']}\n"
+            gap_fixes_text += f"   Correction: {fix['correction']}\n\n"
+
+        gap_fixes_text += "Please incorporate these corrections when generating the specifications.\n"
+        return gap_fixes_text

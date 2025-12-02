@@ -453,3 +453,137 @@ async def proceed_to_generation(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/update-epic/{job_id}/{epic_id}")
+async def update_epic(
+    job_id: str,
+    epic_id: str,
+    name: str = Form(...),
+    description: str = Form(...)
+):
+    """Update an epic's name and description"""
+    try:
+        job = job_manager.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        # Find and update epic
+        epic_found = False
+        for epic in job.results.epics:
+            if epic.id == epic_id:
+                epic.name = name
+                epic.description = description
+                epic_found = True
+                break
+
+        if not epic_found:
+            raise HTTPException(status_code=404, detail="Epic not found")
+
+        return {
+            "success": True,
+            "epic_id": epic_id,
+            "updated": {
+                "name": name,
+                "description": description
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/update-story/{job_id}/{story_id}")
+async def update_story(
+    job_id: str,
+    story_id: str,
+    title: str = Form(...),
+    role: str = Form(...),
+    goal: str = Form(...),
+    benefit: str = Form(...)
+):
+    """Update a user story's core fields"""
+    try:
+        job = job_manager.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        # Find and update story
+        story_found = False
+        for story in job.results.user_stories:
+            if story.id == story_id:
+                story.title = title
+                story.role = role
+                story.goal = goal
+                story.benefit = benefit
+                story_found = True
+                break
+
+        if not story_found:
+            raise HTTPException(status_code=404, detail="Story not found")
+
+        return {
+            "success": True,
+            "story_id": story_id,
+            "updated": {
+                "title": title,
+                "role": role,
+                "goal": goal,
+                "benefit": benefit
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/update-acceptance-criteria/{job_id}/{story_id}")
+async def update_acceptance_criteria(
+    job_id: str,
+    story_id: str,
+    criteria: str = Form(...)  # JSON string array
+):
+    """Update acceptance criteria for a story"""
+    try:
+        job = job_manager.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        # Parse criteria JSON
+        criteria_list = json.loads(criteria)
+
+        # Find and update story
+        story_found = False
+        for story in job.results.user_stories:
+            if story.id == story_id:
+                # Replace acceptance criteria
+                from app.models import AcceptanceCriterion
+                story.acceptance_criteria = [
+                    AcceptanceCriterion(
+                        id=f"ac_{idx + 1}",
+                        text=text,
+                        source_chunks=[]
+                    )
+                    for idx, text in enumerate(criteria_list)
+                ]
+                story_found = True
+                break
+
+        if not story_found:
+            raise HTTPException(status_code=404, detail="Story not found")
+
+        return {
+            "success": True,
+            "story_id": story_id,
+            "criteria_count": len(criteria_list)
+        }
+
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid criteria JSON")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

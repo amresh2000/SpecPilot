@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { ProgressStepper } from '@/components/ui/ProgressStepper';
+import { EditableEpic } from '@/components/EditableEpic';
+import { EditableStory } from '@/components/EditableStory';
 import { api } from '@/lib/api';
 import { getSteps } from '@/lib/steps';
 import type { StatusResponse } from '@/types';
@@ -21,20 +23,20 @@ export const ResultsPage: React.FC = () => {
   const [customInstructions, setCustomInstructions] = useState<Record<string, string>>({});
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  useEffect(() => {
+  const fetchStatus = async () => {
     if (!jobId) return;
 
-    const fetchStatus = async () => {
-      try {
-        const data = await api.getStatus(jobId);
-        setStatus(data);
-        setLoading(false);
-      } catch (error) {
-        console.error('Failed to fetch status:', error);
-        setLoading(false);
-      }
-    };
+    try {
+      const data = await api.getStatus(jobId);
+      setStatus(data);
+      setLoading(false);
+    } catch (error) {
+      console.error('Failed to fetch status:', error);
+      setLoading(false);
+    }
+  };
 
+  useEffect(() => {
     fetchStatus();
   }, [jobId]);
 
@@ -210,93 +212,30 @@ export const ResultsPage: React.FC = () => {
 
           {activeView === 'epics' && (
             <div className="space-y-6">
-              <h2 className="text-2xl font-bold text-gray-900">EPICs & User Stories</h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-2xl font-bold text-gray-900">EPICs & User Stories</h2>
+                <p className="text-sm text-gray-600">Click the edit icon to modify epics and stories</p>
+              </div>
               {results.epics.map((epic) => (
-                <Card key={epic.id}>
-                  <CardHeader>
-                    <CardTitle>{epic.name}</CardTitle>
-                    <p className="text-sm text-gray-600">{epic.description}</p>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      {results.user_stories
-                        .filter((story) => story.epic_id === epic.id)
-                        .map((story) => (
-                          <div key={story.id} className="border-l-4 border-blue-500 pl-4">
-                            <h4 className="font-semibold text-gray-900 mb-2">{story.title}</h4>
-                            <p className="text-sm text-gray-700 mb-3">
-                              As a <span className="font-medium">{story.role}</span>, I want{' '}
-                              <span className="font-medium">{story.goal}</span> so that{' '}
-                              <span className="font-medium">{story.benefit}</span>.
-                            </p>
-                            <div>
-                              <p className="text-sm font-medium text-gray-700 mb-2">
-                                Acceptance Criteria:
-                              </p>
-                              <ul className="list-disc list-inside space-y-1">
-                                {story.acceptance_criteria.map((ac) => (
-                                  <li key={ac.id} className="text-sm text-gray-600">
-                                    {ac.text}
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-
-                            {/* Source chunks indicator */}
-                            {story.source_chunks && story.source_chunks.length > 0 && (
-                              <div className="mt-3 text-xs text-gray-500">
-                                Source chunks: {story.source_chunks.length} references
-                              </div>
-                            )}
-
-                            {/* More Tests section */}
-                            <div className="mt-4 pt-4 border-t border-gray-200">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => setShowInstructions({
-                                  ...showInstructions,
-                                  [story.id]: !showInstructions[story.id]
-                                })}
-                                disabled={generatingMoreTests[story.id] || !story.source_chunks || story.source_chunks.length === 0}
-                              >
-                                {generatingMoreTests[story.id] ? (
-                                  <>
-                                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                    Generating...
-                                  </>
-                                ) : (
-                                  'Generate More Tests'
-                                )}
-                              </Button>
-
-                              {showInstructions[story.id] && (
-                                <div className="mt-3 space-y-2">
-                                  <textarea
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
-                                    placeholder="Optional: Add specific instructions for test generation..."
-                                    rows={3}
-                                    value={customInstructions[story.id] || ""}
-                                    onChange={(e) => setCustomInstructions({
-                                      ...customInstructions,
-                                      [story.id]: e.target.value
-                                    })}
-                                  />
-                                  <Button
-                                    size="sm"
-                                    onClick={() => handleGenerateMoreTests(story.id)}
-                                    disabled={generatingMoreTests[story.id]}
-                                  >
-                                    Generate
-                                  </Button>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                    </div>
-                  </CardContent>
-                </Card>
+                <EditableEpic
+                  key={epic.id}
+                  epic={epic}
+                  jobId={jobId!}
+                  onUpdate={fetchStatus}
+                >
+                  <div className="space-y-4">
+                    {results.user_stories
+                      .filter((story) => story.epic_id === epic.id)
+                      .map((story) => (
+                        <EditableStory
+                          key={story.id}
+                          story={story}
+                          jobId={jobId!}
+                          onUpdate={fetchStatus}
+                        />
+                      ))}
+                  </div>
+                </EditableEpic>
               ))}
             </div>
           )}

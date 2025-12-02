@@ -35,3 +35,28 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Documentation
+docs/*.pdf
+docs/*.docx
+docs/archive/
+
+# Additional IDE
+.claude/
+*.code-workspace
+.cursor/
+
+# Test files
+*.test.local.*
+.coverage
+htmlcov/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary files
+tmp/
+temp/
+*.tmp

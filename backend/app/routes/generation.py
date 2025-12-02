@@ -6,7 +6,7 @@ import asyncio
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
-from app.models import GenerateRequest, GenerateResponse, StatusResponse, ArtefactsConfig, StepStatus, JobStatus, FunctionalTest
+from app.models import GenerateRequest, GenerateResponse, StatusResponse, ArtefactsConfig, StepStatus, JobStatus, FunctionalTest, ValidationReport, GapFix, CTQScore
 from app.services.job_manager import job_manager
 from app.services.brd_parser import BRDParser
 from app.services.generation_pipeline import GenerationPipeline
@@ -280,3 +280,176 @@ async def generate_more_tests(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating tests: {str(e)}")
+
+
+@router.post("/validate-brd")
+async def validate_brd(
+    file: UploadFile = File(...),
+    payload: str = Form(...)
+):
+    """Step 1: Upload BRD and run validation ONLY (no generation yet)"""
+    try:
+        # Parse payload
+        request_data = json.loads(payload)
+        request = GenerateRequest(**request_data)
+
+        # Validate file type
+        if not (file.filename.endswith('.docx') or file.filename.endswith('.txt')):
+            raise HTTPException(status_code=400, detail="Only .docx and .txt files are supported")
+
+        # Check file size (15MB limit)
+        content = await file.read()
+        if len(content) > 15 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="File size exceeds 15MB limit")
+
+        # Create job
+        job_id = job_manager.create_job(request.instructions, request.artefacts)
+        job = job_manager.get_job(job_id)
+        job.uploaded_filename = file.filename
+
+        # Save file
+        job_dir = GENERATED_DIR / job_id
+        job_dir.mkdir(exist_ok=True)
+        file_extension = '.docx' if file.filename.endswith('.docx') else '.txt'
+        uploaded_file_path = job_dir / f"brd{file_extension}"
+
+        with open(uploaded_file_path, 'wb') as f:
+            f.write(content)
+
+        # Parse BRD
+        parser = BRDParser()
+        brd_data = parser.parse(str(uploaded_file_path))
+        job.brd_data = brd_data
+
+        # Run validation
+        llm_client = BedrockLLMClient()
+        validation_result = llm_client.validate_brd_quality(brd_data)
+
+        # Store validation report
+        validation_report = ValidationReport(**validation_result)
+        job.results.validation_report = validation_report
+
+        # Generate gap fixes
+        gap_fixes_data = llm_client.generate_gap_fixes(brd_data, validation_result)
+
+        # Store gap fixes with unique IDs
+        for idx, fix_data in enumerate(gap_fixes_data):
+            fix_data['gap_id'] = f"gap_{idx + 1}"
+            fix_data['user_action'] = "pending"
+            gap_fix = GapFix(**fix_data)
+            job.results.gap_fixes.append(gap_fix)
+
+        # Save validation report to file
+        validation_file = job_dir / "validation_report.json"
+        with open(validation_file, 'w') as f:
+            json.dump({
+                "validation_report": validation_result,
+                "gap_fixes": gap_fixes_data
+            }, f, indent=2)
+
+        return {
+            "job_id": job_id,
+            "validation_report": validation_result,
+            "gap_fixes": [gf.dict() for gf in job.results.gap_fixes]
+        }
+
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid payload format")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/update-gap-fix/{job_id}")
+async def update_gap_fix(
+    job_id: str,
+    gap_id: str = Form(...),
+    action: str = Form(...),
+    final_text: str = Form(None)
+):
+    """User accepts/edits/rejects a gap fix"""
+    try:
+        job = job_manager.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        # Find and update the gap fix
+        gap_fix = None
+        for gf in job.results.gap_fixes:
+            if gf.gap_id == gap_id:
+                gap_fix = gf
+                break
+
+        if not gap_fix:
+            raise HTTPException(status_code=404, detail="Gap fix not found")
+
+        # Update gap fix
+        gap_fix.user_action = action
+        if final_text:
+            gap_fix.final_text = final_text
+
+        return {
+            "gap_id": gap_id,
+            "action": action,
+            "updated": True
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/proceed-to-generation/{job_id}")
+async def proceed_to_generation(
+    job_id: str,
+    background_tasks: BackgroundTasks
+):
+    """After validation review, start the actual generation pipeline"""
+    try:
+        job = job_manager.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        if not job.brd_data:
+            raise HTTPException(status_code=400, detail="BRD not parsed yet")
+
+        # Initialize generation steps
+        if job.artefacts.epics_and_stories:
+            job.add_step("Generating project name")
+            job.add_step("Generating EPICs & User Stories")
+        if job.artefacts.data_model:
+            job.add_step("Generating Data Model")
+        if job.artefacts.functional_tests:
+            job.add_step("Generating Functional Tests")
+        if job.artefacts.gherkin_tests:
+            job.add_step("Generating Gherkin Tests")
+        if job.artefacts.code_skeleton:
+            job.add_step("Generating Code Skeleton")
+
+        # Find the uploaded file
+        job_dir = GENERATED_DIR / job_id
+        uploaded_files = list(job_dir.glob("brd.*"))
+        if not uploaded_files:
+            raise HTTPException(status_code=400, detail="BRD file not found")
+
+        uploaded_file_path = str(uploaded_files[0])
+
+        # Run generation pipeline in background (BRD already parsed and saved)
+        async def run_generation():
+            try:
+                pipeline = GenerationPipeline(job_id, uploaded_file_path)
+                await pipeline.run()
+            except Exception as e:
+                job.mark_failed(str(e))
+
+        background_tasks.add_task(run_generation)
+
+        return {
+            "job_id": job_id,
+            "status": "generation_started"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

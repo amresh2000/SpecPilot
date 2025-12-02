@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ConfigurationPage } from './pages/ConfigurationPage';
+import { ValidationPage } from './pages/ValidationPage';
 import { ProgressPage } from './pages/ProgressPage';
 import { ResultsPage } from './pages/ResultsPage';
 import { CodeSkeletonPage } from './pages/CodeSkeletonPage';
@@ -12,6 +13,7 @@ function App() {
       <Router>
         <Routes>
           <Route path="/" element={<ConfigurationPage />} />
+          <Route path="/validation/:jobId" element={<ValidationPage />} />
           <Route path="/progress/:jobId" element={<ProgressPage />} />
           <Route path="/results/:jobId" element={<ResultsPage />} />
           <Route path="/code/:jobId" element={<CodeSkeletonPage />} />

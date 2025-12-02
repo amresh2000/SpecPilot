@@ -1,169 +1,438 @@
-# Project Generator - BRD → Specs → Tests → Code
+# SpecPilot
 
-Transform Business Requirements Documents (BRDs) into structured specifications, tests, and code skeletons using AWS Bedrock (Claude 3.5 Sonnet).
+> Transform Business Requirements Documents into Technical Artifacts with AI
 
-## 🎯 Overview
+SpecPilot is an AI-powered tool that converts Business Requirements Documents (BRDs) into production-ready technical artifacts including user stories, test cases, data models, and code skeletons.
 
-This application:
-- **Parses** BRD documents (.docx or .txt)
-- **Generates** EPICs, User Stories, and Acceptance Criteria
-- **Creates** Functional and Gherkin test cases
-- **Designs** Data models with Mermaid ER diagrams
-- **Scaffolds** ASP.NET Core API code skeleton
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Node.js 18+](https://img.shields.io/badge/node-18+-green.svg)](https://nodejs.org/)
 
-Built for hackathon demo (3-day timeline).
+---
 
-## 🏗️ Architecture
+## 🚀 Features
 
-**Backend**: FastAPI (Python)
-- BRD parsing with `python-docx`
-- AWS Bedrock integration for LLM calls
-- In-memory job state management
-- ZIP generation for downloads
+### Two-Step Workflow with Human-in-the-Loop
 
-**Frontend**: React + TypeScript + Vite
-- Tailwind CSS + shadcn/ui components
-- Real-time polling for progress updates
-- Multi-page specifications viewer
+1. **BRD Quality Validation**
+   - Evaluates BRD across 10 Critical-to-Quality (CTQ) dimensions
+   - Generates AI-suggested fixes for identified gaps
+   - Human review and approval before generation
 
-## 🚀 Quick Start
+2. **Artifact Generation**
+   - **Epics & User Stories** with acceptance criteria
+   - **Functional Test Cases** with detailed steps
+   - **Gherkin BDD Scenarios** for automated testing
+   - **Data Models** with entity-relationship diagrams (Mermaid)
+   - **Code Skeleton** (ASP.NET Core API structure)
 
-### Prerequisites
+### Key Capabilities
 
-- Python 3.9+
-- Node.js 18+
-- AWS Bedrock access (us-east-1 region)
+- **Document Parsing**: Supports .docx and .txt BRD files
+- **AI-Powered Analysis**: Uses AWS Bedrock (Claude 3.5 Sonnet v2)
+- **Quality Validation**: 10-dimensional CTQ scoring system
+- **Interactive Review**: Review and edit AI suggestions before proceeding
+- **Real-time Progress**: Live updates during generation
+- **Downloadable Results**: Export all artifacts as ZIP
 
-### 1. Backend Setup
+---
+
+## 📋 Table of Contents
+
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Usage](#usage)
+- [Project Structure](#project-structure)
+- [API Documentation](#api-documentation)
+- [Architecture](#architecture)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
+
+## 🔧 Prerequisites
+
+### Required Software
+- **Python 3.8+** with pip
+- **Node.js 18+** with npm
+- **AWS Account** with Bedrock access
+- **Git** for version control
+
+### AWS Setup
+
+1. **Enable AWS Bedrock** in your AWS account
+2. **Request access** to Claude 3.5 Sonnet v2 model:
+   - Go to AWS Bedrock Console
+   - Navigate to "Model access"
+   - Request access to Anthropic Claude models
+3. **Configure AWS credentials**:
+   ```bash
+   aws configure
+   # Enter your AWS Access Key ID
+   # Enter your Secret Access Key
+   # Default region: us-east-1
+   ```
+
+---
+
+## 📦 Installation
+
+### 1. Clone the Repository
+
+```bash
+git clone https://github.com/YOUR_USERNAME/SpecPilot.git
+cd SpecPilot
+```
+
+### 2. Backend Setup
 
 ```bash
 cd backend
 
 # Create virtual environment
-python -m venv venv
+python3 -m venv venv
+
+# Activate virtual environment
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
-
-# Configure AWS credentials
-cp .env.example .env
-# Edit .env and add your AWS credentials
-
-# Run server
-uvicorn app.main:app --reload --port 8000
 ```
 
-Backend API: `http://localhost:8000`
-
-### 2. Frontend Setup
+### 3. Frontend Setup
 
 ```bash
 cd frontend
 
 # Install dependencies
 npm install
+```
 
-# Run development server
+---
+
+## ⚙️ Configuration
+
+### Backend Configuration
+
+Create a `.env` file in the `backend/` directory (optional):
+
+```bash
+# AWS Configuration
+AWS_REGION=us-east-1
+AWS_PROFILE=default
+
+# Server Configuration (optional)
+PORT=8000
+HOST=0.0.0.0
+```
+
+### Frontend Configuration
+
+The frontend is pre-configured to connect to `http://localhost:8000/api`.
+
+To change the API URL, edit `frontend/src/lib/api.ts`:
+
+```typescript
+const API_BASE_URL = 'http://localhost:8000/api';
+```
+
+---
+
+## 🎯 Usage
+
+### Start the Backend Server
+
+```bash
+cd backend
+source venv/bin/activate  # Activate virtual environment
+./venv/bin/uvicorn app.main:app --reload --port 8000
+```
+
+Backend will be available at: `http://localhost:8000`
+
+### Start the Frontend Development Server
+
+```bash
+cd frontend
 npm run dev
 ```
 
-Frontend app: `http://localhost:5173`
+Frontend will be available at: `http://localhost:5173`
 
-## 📋 Usage
+### Using the Application
 
-1. **Upload BRD**: Go to `http://localhost:5173` and upload a `.docx` or `.txt` BRD file
-2. **Configure**: Add optional instructions and select artifacts to generate
-3. **Generate**: Click "Generate" to start the pipeline
-4. **Monitor**: Watch real-time progress with step-by-step status
-5. **Review**: Browse generated EPICs, User Stories, Tests, and Data Models
-6. **Download**: Get ZIP with all artifacts or view code skeleton
+#### Step 1: Upload BRD and Validate
 
-## 🎨 Features
+1. Open `http://localhost:5173` in your browser
+2. Upload your BRD file (.docx or .txt, max 15MB)
+3. Configure which artifacts to generate:
+   - ✅ Epics & User Stories
+   - ✅ Data Model
+   - ✅ Functional Tests
+   - ✅ Gherkin Tests
+   - ✅ Code Skeleton
+4. Click **"Generate Artifacts"**
+5. Wait for validation to complete (~30 seconds)
 
-### Must-Have (Implemented)
-- ✅ BRD parsing (.docx + .txt)
-- ✅ 5 LLM calls for all artifact types
-- ✅ EPICs & User Stories with source tracking
-- ✅ Functional test cases
-- ✅ Gherkin BDD scenarios
-- ✅ Data model with Mermaid diagrams
-- ✅ ASP.NET Core code skeleton
-- ✅ Complete frontend UI (4 pages)
-- ✅ ZIP download functionality
+#### Step 2: Review Validation Results
 
-### Future Enhancements (v2)
-- Zoom-in "More tests" feature using `source_chunks`
-- Copy buttons for artifacts
-- Individual artifact downloads
-- WebSocket real-time updates
-- Multi-user support with authentication
+1. Review **Overall Quality Score** (0-5 scale)
+2. Examine **CTQ Dimension Scores** across 10 categories
+3. Review **Identified Gaps** with AI-suggested fixes
+4. For each gap:
+   - **Accept** the AI suggestion as-is
+   - **Edit & Accept** to modify the suggestion
+   - **Reject** to discard the suggestion
+
+#### Step 3: Generate Artifacts
+
+1. Click **"Proceed to Generation"** after reviewing gaps
+2. Monitor real-time progress as artifacts are generated
+3. Wait for completion (~2-5 minutes)
+4. Download results as ZIP file
+
+---
 
 ## 📁 Project Structure
 
 ```
-.
-├── backend/
+SpecPilot/
+├── backend/                    # FastAPI backend
 │   ├── app/
-│   │   ├── main.py              # FastAPI app
-│   │   ├── models/              # Pydantic schemas
-│   │   ├── routes/              # API endpoints
+│   │   ├── main.py            # Application entry point
+│   │   ├── models/
+│   │   │   └── schemas.py     # Pydantic data models
+│   │   ├── routes/
+│   │   │   └── generation.py  # API endpoints
 │   │   └── services/
-│   │       ├── brd_parser.py    # Document parsing
-│   │       ├── llm_client.py    # Bedrock client
-│   │       ├── job_manager.py   # State management
-│   │       └── generation_pipeline.py
-│   ├── generated/               # Output directory
-│   └── requirements.txt
-├── frontend/
+│   │       ├── brd_parser.py          # Document parsing
+│   │       ├── llm_client.py          # AWS Bedrock client
+│   │       ├── generation_pipeline.py # Orchestration
+│   │       └── job_manager.py         # State management
+│   ├── generated/             # Output directory
+│   └── requirements.txt       # Python dependencies
+├── frontend/                  # React frontend
 │   ├── src/
-│   │   ├── components/          # UI components
-│   │   ├── pages/               # Route pages
-│   │   ├── lib/                 # Utils & API client
-│   │   └── types/               # TypeScript types
-│   └── package.json
-└── docs/
-    └── PROJECT_SPEC.md          # Original specification
+│   │   ├── components/        # Reusable UI components
+│   │   ├── pages/             # Page components
+│   │   │   ├── HomePage.tsx           # Upload page
+│   │   │   ├── ValidationPage.tsx     # Review page
+│   │   │   ├── ProgressPage.tsx       # Progress tracker
+│   │   │   └── ResultsPage.tsx        # Results viewer
+│   │   ├── lib/               # Utilities and API client
+│   │   └── main.tsx           # Entry point
+│   └── package.json           # Node dependencies
+├── docs/                      # Documentation
+│   ├── API.md                 # API reference
+│   ├── ARCHITECTURE.md        # System architecture
+│   ├── PROJECT_SPEC.md        # Original specification
+│   ├── VALIDATION_IMPLEMENTATION.md  # Validation system
+│   └── UI_IMPROVEMENTS.md     # UI enhancement log
+├── .gitignore
+├── README.md
+└── CONTRIBUTING.md            # Contribution guidelines
 ```
 
-## 🔧 API Endpoints
+---
 
-- `GET /health` - Health check
-- `POST /api/generate` - Start generation
-- `GET /api/status/{job_id}` - Get status + results
-- `GET /api/download/{job_id}` - Download ZIP
+## 📚 API Documentation
+
+See [docs/API.md](docs/API.md) for complete API reference.
+
+### Key Endpoints
+
+- `POST /api/validate-brd` - Upload and validate BRD
+- `POST /api/update-gap-fix/{job_id}` - Update gap fix review
+- `POST /api/proceed-to-generation/{job_id}` - Start generation
+- `GET /api/status/{job_id}` - Poll for progress
+- `GET /api/download/{job_id}` - Download artifacts
+
+---
+
+## 🏗️ Architecture
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentation.
+
+### High-Level Overview
+
+```
+┌──────────────┐
+│   React UI   │ ← User uploads BRD, reviews validation
+└──────┬───────┘
+       │ HTTP/REST
+       ▼
+┌──────────────┐
+│  FastAPI API │ ← Orchestrates workflow
+└──────┬───────┘
+       │ Boto3 SDK
+       ▼
+┌──────────────┐
+│ AWS Bedrock  │ ← Claude 3.5 Sonnet v2
+│  (Claude)    │   Validation + Generation
+└──────────────┘
+```
+
+### Technology Stack
+
+**Backend**:
+- FastAPI 0.115+ (async web framework)
+- AWS Boto3 (Bedrock SDK)
+- python-docx (document parsing)
+- Pydantic v2 (data validation)
+
+**Frontend**:
+- React 18.3+ with TypeScript
+- Vite (build tool)
+- TailwindCSS (styling)
+- Lucide React (icons)
+
+**AI/ML**:
+- AWS Bedrock
+- Claude 3.5 Sonnet v2 (Anthropic)
+
+---
+
+## 10 Critical-to-Quality (CTQ) Dimensions
+
+SpecPilot validates BRDs across these dimensions:
+
+1. **Completeness** - Business scenarios, exception flows, regulatory requirements
+2. **Clarity** - Clear wording, defined terms, consistent vocabulary
+3. **Accuracy** - Alignment with objectives, process maps, regulations
+4. **Testability** - Verifiable requirements, acceptance criteria
+5. **Traceability** - Links across objectives, processes, data, stories, tests
+6. **Feasibility** - Technical and operational feasibility
+7. **Consistency** - No conflicting requirements or contradictions
+8. **Prioritisation** - Clear prioritization schema (MoSCoW, etc.)
+9. **NFR Coverage** - Non-functional requirements (performance, security, audit)
+10. **Stakeholder Validation** - Stakeholder responsibilities, RACI, sign-offs
+
+Each dimension is scored 0-5, with detailed findings and recommendations.
+
+---
 
 ## 🧪 Testing
 
-Upload a sample BRD (20-60 pages with sections and tables) to test the complete pipeline.
+### Manual Testing
 
-**Expected Processing Time**: 30-120 seconds depending on BRD size and complexity.
+1. Test BRD upload with sample documents
+2. Verify validation scores and gap fixes
+3. Test gap fix review actions (accept/edit/reject)
+4. Monitor generation progress
+5. Verify downloaded artifacts
 
-## ⚙️ Configuration
+### Automated Testing (Planned)
 
-### Backend (.env)
-```
-AWS_ACCESS_KEY_ID=your_key
-AWS_SECRET_ACCESS_KEY=your_secret
-AWS_DEFAULT_REGION=us-east-1
-PORT=8000
-```
+- Backend unit tests with pytest
+- Frontend component tests with Vitest
+- E2E tests with Playwright
+- API integration tests
 
-### File Limits
-- Max upload size: **15MB**
-- Supported formats: **.docx**, **.txt**
+---
 
-## 🐛 Troubleshooting
+## 🤝 Contributing
 
-**Error: "Failed to parse JSON"**
-- The LLM may have returned invalid JSON. The system retries once automatically.
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-**Error: "Job not found"**
-- In-memory storage was cleared (server restart). Jobs are not persisted.
+### Quick Start for Contributors
 
-**Slow generation**
-- Large BRDs (>50 pages) may take longer. Consider reducing content or sections.
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/your-feature`
+3. Make your changes following coding standards
+4. Commit with conventional commits: `feat(scope): description`
+5. Push and create a Pull Request
 
-## 📝 License
+---
 
-Built for hackathon demo purposes.
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## 🙏 Acknowledgments
+
+- **AWS Bedrock** for providing Claude 3.5 Sonnet v2 API
+- **Anthropic** for the Claude language model
+- **FastAPI** and **React** communities for excellent frameworks
+
+---
+
+## 📞 Support
+
+- **Documentation**: See `docs/` folder
+- **Issues**: [GitHub Issues](https://github.com/YOUR_USERNAME/SpecPilot/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/YOUR_USERNAME/SpecPilot/discussions)
+
+---
+
+## 🗺️ Roadmap
+
+### Current Version (v1.0)
+- ✅ BRD quality validation with 10 CTQ dimensions
+- ✅ Human-in-the-loop gap review
+- ✅ Artifact generation (Epics, Stories, Tests, Code)
+- ✅ Real-time progress tracking
+- ✅ Downloadable results as ZIP
+
+### Planned Features (v2.0)
+- [ ] Database persistence for jobs
+- [ ] User authentication and sessions
+- [ ] Multi-user support
+- [ ] Export to Jira/Azure DevOps
+- [ ] Custom CTQ dimension configuration
+- [ ] Batch BRD processing
+- [ ] API rate limiting and quotas
+- [ ] Enhanced code generation (multiple languages)
+- [ ] AI-powered test data generation
+
+---
+
+## 📊 Performance
+
+- **BRD Upload**: < 2 seconds
+- **Validation**: 20-40 seconds
+- **Full Generation**: 2-5 minutes (depending on BRD size)
+- **File Size Limit**: 15MB
+- **Concurrent Users**: Development only (single instance)
+
+---
+
+## 🔐 Security
+
+- **Input Validation**: All inputs validated with Pydantic
+- **File Type Restriction**: Only .docx and .txt allowed
+- **File Size Limit**: 15MB maximum
+- **CORS**: Restricted to localhost in development
+- **AWS Credentials**: Never exposed to frontend
+
+**Production Security TODO**:
+- Add authentication (JWT)
+- Implement rate limiting
+- Add input sanitization
+- Secure file upload validation
+- Enable HTTPS only
+
+---
+
+## 🐛 Known Issues
+
+- In-memory job storage (lost on server restart)
+- No authentication/authorization
+- Single-server deployment only
+- AWS Bedrock throttling during high usage (handled with retry logic)
+
+---
+
+## 💡 Tips
+
+- **BRD Quality**: Higher quality BRDs produce better artifacts
+- **Validation Review**: Take time to review gap fixes - they improve results
+- **Large Documents**: Documents >100 pages may take longer to process
+- **AWS Costs**: Monitor Bedrock API usage to control costs
+- **Error Recovery**: If generation fails, check AWS credentials and Bedrock quotas
+
+---
+
+**Made with ❤️ by the SpecPilot Team**

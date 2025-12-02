@@ -17,6 +17,9 @@ from .schemas import (
     CodeSkeleton,
     GenerationResults,
     StatusResponse,
+    CTQScore,
+    ValidationReport,
+    GapFix,
 )
 
 __all__ = [
@@ -38,4 +41,7 @@ __all__ = [
     "CodeSkeleton",
     "GenerationResults",
     "StatusResponse",
+    "CTQScore",
+    "ValidationReport",
+    "GapFix",
 ]

@@ -45,7 +45,7 @@ export const ConfigurationPage: React.FC = () => {
     }
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!file) {
       const errorMsg = 'Please upload a BRD file';
       setError(errorMsg);
@@ -54,12 +54,25 @@ export const ConfigurationPage: React.FC = () => {
     }
 
     setIsSubmitting(true);
-    toast.info('Starting generation process...');
+    toast.info('Uploading and validating BRD...');
 
-    // Navigate immediately to progress page with upload state
-    navigate('/progress/uploading', {
-      state: { file, instructions, artefacts }
-    });
+    try {
+      // Call validation API
+      const result = await api.validateBRD(file, { instructions, artefacts });
+
+      toast.success('BRD validation complete!');
+
+      // Navigate to validation page with results
+      navigate(`/validation/${result.job_id}`, {
+        state: {
+          validation: result.validation_report,
+          gapFixes: result.gap_fixes
+        }
+      });
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || 'Validation failed');
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -156,7 +169,7 @@ export const ConfigurationPage: React.FC = () => {
               </div>
             )}
 
-            {/* Generate Button */}
+            {/* Validate & Generate Button */}
             <div className="flex justify-end">
               <Button
                 size="lg"
@@ -166,10 +179,10 @@ export const ConfigurationPage: React.FC = () => {
                 {isSubmitting ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Starting Generation...
+                    Validating BRD...
                   </>
                 ) : (
-                  'Generate'
+                  'Validate & Generate'
                 )}
               </Button>
             </div>

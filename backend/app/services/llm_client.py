@@ -374,3 +374,193 @@ Use proper ASP.NET Core 8.0 patterns and structure.
         system_prompt = "You are an expert .NET architect. Output only valid JSON, no markdown formatting."
 
         return self._invoke_claude(prompt, system_prompt)
+
+    def validate_brd_quality(
+        self,
+        brd_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Call F: BRD → 10 CTQ Validation Scores"""
+
+        # Prepare context from BRD
+        chunks = brd_data.get('chunks', [])
+        chunks_text = "\n".join([
+            f"Chunk {c['id']} ({c['type']}): {c['text'][:200]}"
+            for c in chunks[:30]
+        ])
+
+        sections_text = "\n\n".join([
+            f"Section {s['id']}: {s['title']}\n{s['text']}"
+            for s in brd_data.get('sections', [])[:10]
+        ])
+
+        tables_text = "\n\n".join([
+            f"Table {t['table_id']}: {', '.join(t['headers'])}\n" +
+            "\n".join([str(row) for row in t['rows'][:5]])
+            for t in brd_data.get('tables', [])[:5]
+        ])
+
+        prompt = f"""Evaluate this Business Requirements Document across 10 Critical-to-Quality (CTQ) dimensions.
+
+BRD Content:
+{sections_text}
+
+{tables_text if tables_text else ''}
+
+BRD Chunks (for reference):
+{chunks_text}
+
+Evaluate each dimension on a 0-5 scale:
+
+1. **Completeness** - Are business scenarios, exception flows, regulatory requirements, and dependencies documented?
+2. **Clarity & Unambiguity** - Is wording clear? Are terms defined? Is vocabulary consistent?
+3. **Accuracy & Alignment** - Do requirements align with business objectives, process maps, and regulatory drivers?
+4. **Testability** - Can each requirement be verified? Are acceptance criteria present?
+5. **Traceability** - Are there clear links across objectives, processes, data, user stories, and tests?
+6. **Feasibility** - Are requirements technically and operationally feasible given system constraints?
+7. **Consistency** - Are there conflicting requirements or contradictory assumptions?
+8. **Prioritisation** - Is there a clear prioritization schema (MoSCoW, etc.)?
+9. **NFR Coverage** - Are non-functional requirements (performance, security, audit, retention) documented?
+10. **Stakeholder Validation** - Are stakeholder responsibilities, RACI, and sign-offs documented?
+
+Output ONLY valid JSON matching this exact schema:
+{{
+  "ctq_scores": {{
+    "completeness": 4,
+    "clarity": 3,
+    "accuracy": 5,
+    "testability": 2,
+    "traceability": 3,
+    "feasibility": 4,
+    "consistency": 5,
+    "prioritisation": 3,
+    "nfr_coverage": 2,
+    "stakeholder_validation": 4
+  }},
+  "overall_score": 3.5,
+  "key_gaps": [
+    "Lack of exception flows for trade booking failure scenarios",
+    "Missing NFRs for performance and data archiving",
+    "Unclear acceptance criteria in Section 4.2"
+  ],
+  "remediation_actions": [
+    "Add exception scenarios for trade booking failures",
+    "Define measurable acceptance criteria using Given-When-Then format",
+    "Add NFRs for latency, audit logging, and data retention"
+  ],
+  "detailed_findings": {{
+    "completeness": {{
+      "score": 4,
+      "findings": ["Missing upstream dependency: CAESAR API authentication details", "No error handling scenarios documented"],
+      "recommendations": ["Document CAESAR API integration requirements", "Add exception flow diagrams"]
+    }},
+    "clarity": {{
+      "score": 3,
+      "findings": ["Undefined term: 'RTG_FITCH_OUTLOOK' not explained", "Ambiguous: 'System shall process trades' lacks specificity"],
+      "recommendations": ["Add glossary of technical terms", "Rewrite vague requirements with specific criteria"]
+    }},
+    "accuracy": {{
+      "score": 5,
+      "findings": [],
+      "recommendations": []
+    }},
+    "testability": {{
+      "score": 2,
+      "findings": ["Requirement 'System shall be fast' is not measurable", "Missing acceptance criteria for 8 out of 12 requirements"],
+      "recommendations": ["Rewrite as 'Response time < 200ms for 95% of requests'", "Add Given-When-Then acceptance criteria"]
+    }},
+    "traceability": {{
+      "score": 3,
+      "findings": ["No explicit mapping from requirements to test cases", "Business objectives not linked to specific requirements"],
+      "recommendations": ["Create traceability matrix", "Add requirement IDs and cross-references"]
+    }},
+    "feasibility": {{
+      "score": 4,
+      "findings": ["Timeline may be aggressive for CAESAR integration complexity"],
+      "recommendations": ["Validate timeline with technical team", "Consider phased rollout"]
+    }},
+    "consistency": {{
+      "score": 5,
+      "findings": [],
+      "recommendations": []
+    }},
+    "prioritisation": {{
+      "score": 3,
+      "findings": ["No MoSCoW or similar prioritization schema present"],
+      "recommendations": ["Classify requirements as Must/Should/Could/Won't have"]
+    }},
+    "nfr_coverage": {{
+      "score": 2,
+      "findings": ["No performance requirements (latency, throughput)", "Missing audit and compliance requirements", "No data retention policy"],
+      "recommendations": ["Add performance SLAs", "Document audit logging requirements", "Define data retention periods"]
+    }},
+    "stakeholder_validation": {{
+      "score": 4,
+      "findings": ["RACI matrix incomplete - no 'Informed' parties listed"],
+      "recommendations": ["Complete RACI matrix with all stakeholder roles"]
+    }}
+  }}
+}}
+
+Be specific and actionable in findings and recommendations.
+"""
+
+        system_prompt = "You are an expert Business Analyst and Quality Assurance specialist. Output only valid JSON, no markdown formatting."
+
+        return self._invoke_claude(prompt, system_prompt)
+
+    def generate_gap_fixes(
+        self,
+        brd_data: Dict[str, Any],
+        validation_report: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """Call G: Validation Gaps → AI-Suggested Fixes"""
+
+        sections_text = "\n\n".join([
+            f"Section {s['id']}: {s['title']}\n{s['text']}"
+            for s in brd_data.get('sections', [])[:10]
+        ])
+
+        gap_fixes = []
+
+        for gap in validation_report["key_gaps"][:10]:  # Limit to 10 gaps max
+            prompt = f"""A quality gap was identified in this BRD:
+
+Gap: {gap}
+
+BRD Context:
+{sections_text}
+
+Generate a specific, actionable fix for this gap.
+
+Output ONLY valid JSON matching this schema:
+{{
+  "gap_id": "gap_1",
+  "gap_description": "{gap}",
+  "affected_section": "Section 3.2 - Trade Booking",
+  "current_text": "System shall process trades",
+  "suggested_fix": "System shall process trade bookings with the following exception handling:\\n- If booking fails due to duplicate trade ID, return error code ERR_DUPLICATE and log to audit table\\n- If booking fails due to invalid counterparty, return error code ERR_INVALID_CP and notify trade desk via email\\n- System shall retry failed bookings up to 3 times with exponential backoff",
+  "rationale": "Adding specific exception flows ensures system behavior is well-defined for error scenarios and enables proper testing",
+  "confidence": "high"
+}}
+
+Be highly specific with:
+- Exact threshold values (e.g., "< 200ms" not "fast")
+- Concrete examples (e.g., specific error codes)
+- Measurable criteria
+- Actionable steps
+
+If the gap is about acceptance criteria, use Given-When-Then format.
+If the gap is about NFRs, provide specific metrics and SLAs.
+"""
+
+            system_prompt = "You are an expert Business Analyst. Output only valid JSON, no markdown formatting."
+
+            try:
+                fix = self._invoke_claude(prompt, system_prompt)
+                gap_fixes.append(fix)
+            except Exception as e:
+                print(f"Error generating fix for gap '{gap}': {str(e)}")
+                # Continue with other gaps
+                continue
+
+        return gap_fixes

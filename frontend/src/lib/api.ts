@@ -44,4 +44,45 @@ export const api = {
   getDownloadUrl(jobId: string): string {
     return `${API_BASE_URL}/download/${jobId}`;
   },
+
+  async validateBRD(file: File, request: GenerateRequest): Promise<any> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('payload', JSON.stringify(request));
+
+    const response = await axios.post(`${API_BASE_URL}/validate-brd`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+
+    return response.data;
+  },
+
+  async updateGapFix(
+    jobId: string,
+    gapId: string,
+    action: string,
+    finalText?: string
+  ): Promise<any> {
+    const formData = new FormData();
+    formData.append('gap_id', gapId);
+    formData.append('action', action);
+    if (finalText) {
+      formData.append('final_text', finalText);
+    }
+
+    const response = await axios.post(`${API_BASE_URL}/update-gap-fix/${jobId}`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+
+    return response.data;
+  },
+
+  async proceedToGeneration(jobId: string): Promise<any> {
+    const response = await axios.post(`${API_BASE_URL}/proceed-to-generation/${jobId}`);
+    return response.data;
+  },
 };

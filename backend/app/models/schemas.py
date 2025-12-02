@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from enum import Enum
+from datetime import datetime
 
 
 class JobStatus(str, Enum):
@@ -113,6 +114,34 @@ class CodeSkeleton(BaseModel):
     folders: List[CodeFolder]
 
 
+# Validation Models
+class CTQScore(BaseModel):
+    score: int  # 0-5
+    findings: List[str]
+    recommendations: List[str]
+
+
+class ValidationReport(BaseModel):
+    ctq_scores: Dict[str, int]  # {"completeness": 4, "clarity": 3, ...}
+    overall_score: float
+    key_gaps: List[str]
+    remediation_actions: List[str]
+    detailed_findings: Dict[str, CTQScore]
+    timestamp: datetime = Field(default_factory=datetime.now)
+
+
+class GapFix(BaseModel):
+    gap_id: str
+    gap_description: str
+    affected_section: str
+    current_text: str
+    suggested_fix: str
+    rationale: str
+    confidence: str  # "high" | "medium" | "low"
+    user_action: Optional[str] = None  # "accepted" | "edited" | "rejected" | "pending"
+    final_text: Optional[str] = None
+
+
 class GenerationResults(BaseModel):
     project_name: Optional[str] = None
     epics: List[Epic] = []
@@ -123,6 +152,8 @@ class GenerationResults(BaseModel):
     mermaid: Optional[str] = None
     code_tree: List[Dict[str, Any]] = []
     code_skeleton: Optional[CodeSkeleton] = None
+    validation_report: Optional[ValidationReport] = None
+    gap_fixes: List[GapFix] = Field(default_factory=list)
 
 
 class StatusResponse(BaseModel):

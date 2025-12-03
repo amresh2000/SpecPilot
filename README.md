@@ -4,17 +4,12 @@
 
 SpecPilot is an AI-powered tool that converts Business Requirements Documents (BRDs) into production-ready technical artifacts including user stories, test cases, data models, and code skeletons.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![Node.js 18+](https://img.shields.io/badge/node-18+-green.svg)](https://nodejs.org/)
-
----
-
 ## 🚀 Features
 
 ### Two-Step Workflow with Human-in-the-Loop
 
 1. **BRD Quality Validation**
+
    - Evaluates BRD across 10 Critical-to-Quality (CTQ) dimensions
    - Generates AI-suggested fixes for identified gaps
    - Human review and approval before generation
@@ -46,14 +41,13 @@ SpecPilot is an AI-powered tool that converts Business Requirements Documents (B
 - [Project Structure](#project-structure)
 - [API Documentation](#api-documentation)
 - [Architecture](#architecture)
-- [Contributing](#contributing)
-- [License](#license)
 
 ---
 
 ## 🔧 Prerequisites
 
 ### Required Software
+
 - **Python 3.8+** with pip
 - **Node.js 18+** with npm
 - **AWS Account** with Bedrock access
@@ -134,7 +128,7 @@ The frontend is pre-configured to connect to `http://localhost:8000/api`.
 To change the API URL, edit `frontend/src/lib/api.ts`:
 
 ```typescript
-const API_BASE_URL = 'http://localhost:8000/api';
+const API_BASE_URL = "http://localhost:8000/api";
 ```
 
 ---
@@ -144,6 +138,7 @@ const API_BASE_URL = 'http://localhost:8000/api';
 ### Quick Start with Startup Scripts
 
 **Option 1: Start Everything (Recommended)**
+
 ```bash
 # macOS/Linux
 ./start-all.sh
@@ -151,16 +146,19 @@ const API_BASE_URL = 'http://localhost:8000/api';
 # Windows
 start.bat
 ```
+
 This opens separate terminal windows for backend and frontend automatically.
 
 **Option 2: Start Manually**
 
 Backend:
+
 ```bash
 ./start-backend.sh  # macOS/Linux
 ```
 
 Frontend:
+
 ```bash
 ./start-frontend.sh  # macOS/Linux
 ```
@@ -168,6 +166,7 @@ Frontend:
 ### Manual Start (Alternative)
 
 **Backend**:
+
 ```bash
 cd backend
 source venv/bin/activate  # On Windows: venv\Scripts\activate
@@ -175,6 +174,7 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
 
 **Frontend**:
+
 ```bash
 cd frontend
 npm run dev
@@ -254,7 +254,6 @@ SpecPilot/
 │   ├── API.md                 # API reference
 │   ├── ARCHITECTURE.md        # System architecture
 │   ├── PROJECT_SPEC.md        # Original specification
-│   ├── VALIDATION_IMPLEMENTATION.md  # Validation system
 │   └── UI_IMPROVEMENTS.md     # UI enhancement log
 ├── .gitignore
 ├── README.md
@@ -303,18 +302,21 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture docum
 ### Technology Stack
 
 **Backend**:
+
 - FastAPI 0.115+ (async web framework)
 - AWS Boto3 (Bedrock SDK)
 - python-docx (document parsing)
 - Pydantic v2 (data validation)
 
 **Frontend**:
+
 - React 18.3+ with TypeScript
 - Vite (build tool)
 - TailwindCSS (styling)
 - Lucide React (icons)
 
 **AI/ML**:
+
 - AWS Bedrock
 - Claude 3.5 Sonnet v2 (Anthropic)
 
@@ -349,71 +351,6 @@ Each dimension is scored 0-5, with detailed findings and recommendations.
 4. Monitor generation progress
 5. Verify downloaded artifacts
 
-### Automated Testing (Planned)
-
-- Backend unit tests with pytest
-- Frontend component tests with Vitest
-- E2E tests with Playwright
-- API integration tests
-
----
-
-## 🤝 Contributing
-
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-### Quick Start for Contributors
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/your-feature`
-3. Make your changes following coding standards
-4. Commit with conventional commits: `feat(scope): description`
-5. Push and create a Pull Request
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-## 🙏 Acknowledgments
-
-- **AWS Bedrock** for providing Claude 3.5 Sonnet v2 API
-- **Anthropic** for the Claude language model
-- **FastAPI** and **React** communities for excellent frameworks
-
----
-
-## 📞 Support
-
-- **Documentation**: See `docs/` folder
-- **Issues**: [GitHub Issues](https://github.com/YOUR_USERNAME/SpecPilot/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/YOUR_USERNAME/SpecPilot/discussions)
-
----
-
-## 🗺️ Roadmap
-
-### Current Version (v1.0)
-- ✅ BRD quality validation with 10 CTQ dimensions
-- ✅ Human-in-the-loop gap review
-- ✅ Artifact generation (Epics, Stories, Tests, Code)
-- ✅ Real-time progress tracking
-- ✅ Downloadable results as ZIP
-
-### Planned Features (v2.0)
-- [ ] Database persistence for jobs
-- [ ] User authentication and sessions
-- [ ] Multi-user support
-- [ ] Export to Jira/Azure DevOps
-- [ ] Custom CTQ dimension configuration
-- [ ] Batch BRD processing
-- [ ] API rate limiting and quotas
-- [ ] Enhanced code generation (multiple languages)
-- [ ] AI-powered test data generation
-
 ---
 
 ## 📊 Performance
@@ -435,6 +372,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **AWS Credentials**: Never exposed to frontend
 
 **Production Security TODO**:
+
 - Add authentication (JWT)
 - Implement rate limiting
 - Add input sanitization

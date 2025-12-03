@@ -11,7 +11,8 @@
       "Bash(npm run dev:*)",
       "WebSearch",
       "Bash(find:*)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash([ -f .env ])"
     ],
     "deny": [],
     "ask": []

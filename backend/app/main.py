@@ -1,6 +1,18 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import generation
+from app.config import config
+
+# Load and validate configuration at startup
+try:
+    config.validate()
+    print("✓ Configuration validated successfully")
+    if config.HTTP_PROXY:
+        print(f"✓ Using proxy: {config.HTTP_PROXY}")
+except ValueError as e:
+    print(f"✗ Configuration error: {e}")
+    print("Please check your .env file and ensure all required variables are set")
+    raise
 
 app = FastAPI(title="Project Generator API", version="1.0.0")
 

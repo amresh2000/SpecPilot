@@ -1,5 +1,6 @@
 import json
 import time
+import os
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
@@ -8,20 +9,33 @@ from app.models import (
     Epic, UserStory, AcceptanceCriterion, FunctionalTest,
     GherkinScenario, Entity, EntityField, CodeSkeleton, CodeFolder, CodeFile
 )
+from app.config import config as app_config
 
 
 class BedrockLLMClient:
     """AWS Bedrock client for Claude 3.5 Sonnet"""
 
-    def __init__(self, region_name: str = "us-east-1"):
+    def __init__(self, region_name: str = None):
+        # Use environment variable for region, fallback to parameter or default
+        region = region_name or app_config.AWS_REGION
+
         # Configure boto3 to disable automatic retries (we handle retries manually)
-        config = Config(
+        boto_config = Config(
             retries={
                 'max_attempts': 1,  # Disable boto3 automatic retries
                 'mode': 'standard'
             }
         )
-        self.client = boto3.client('bedrock-runtime', region_name=region_name, config=config)
+
+        # Create boto3 client with credentials from environment
+        # boto3 automatically uses HTTP_PROXY/HTTPS_PROXY from environment
+        self.client = boto3.client(
+            'bedrock-runtime',
+            region_name=region,
+            aws_access_key_id=app_config.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=app_config.AWS_SECRET_ACCESS_KEY,
+            config=boto_config
+        )
         # Use inference profile ID for Claude 3.5 Sonnet v2 (required for on-demand throughput)
         self.model_id = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
         self.max_retries = 5  # Increased from 1 to 5

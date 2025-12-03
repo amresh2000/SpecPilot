@@ -109,17 +109,63 @@ npm install
 
 ### Backend Configuration
 
-Create a `.env` file in the `backend/` directory (optional):
+**REQUIRED**: Create a `.env` file in the `backend/` directory:
 
 ```bash
-# AWS Configuration
-AWS_REGION=us-east-1
-AWS_PROFILE=default
-
-# Server Configuration (optional)
-PORT=8000
-HOST=0.0.0.0
+# Copy the example file and customize
+cp backend/.env.example backend/.env
 ```
+
+Edit `backend/.env` with your configuration:
+
+```bash
+# AWS Bedrock Configuration (REQUIRED)
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=your-access-key-here
+AWS_SECRET_ACCESS_KEY=your-secret-key-here
+
+# Corporate Proxy Configuration (Optional)
+# Uncomment if using SPNEGO or corporate proxy
+# HTTP_PROXY=http://127.0.0.1:8888
+# HTTPS_PROXY=http://127.0.0.1:8888
+# NO_PROXY=localhost,127.0.0.1
+
+# Jira Integration (Optional - Future Feature)
+# JIRA_URL=https://yourcompany.atlassian.net
+# JIRA_EMAIL=your-email@company.com
+# JIRA_API_TOKEN=your-api-token
+# JIRA_PROJECT_KEY=PROJ
+
+# Application Settings
+PORT=8000
+```
+
+#### Corporate Environment Setup
+
+If using SpecPilot in a corporate environment with proxy/SSO:
+
+1. **Start your SPNEGO proxy** (if applicable):
+   ```bash
+   # Windows
+   start-proxy.bat
+
+   # This runs proxy on 127.0.0.1:8888
+   ```
+
+2. **Configure proxy in .env**:
+   ```bash
+   HTTP_PROXY=http://127.0.0.1:8888
+   HTTPS_PROXY=http://127.0.0.1:8888
+   NO_PROXY=localhost,127.0.0.1
+   ```
+
+3. **SSL Certificate (if needed)**:
+   ```bash
+   # For self-signed corporate certificates
+   REQUESTS_CA_BUNDLE=/path/to/corporate-ca-bundle.crt
+   ```
+
+The application automatically routes all AWS Bedrock and Jira API calls through the configured proxy.
 
 ### Frontend Configuration
 

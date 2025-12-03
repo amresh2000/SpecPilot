@@ -35,12 +35,15 @@ export interface UserStory {
   benefit: string;
   acceptance_criteria: AcceptanceCriterion[];
   source_chunks?: string[];
+  edited_at?: string;
+  regeneration_needed?: boolean;
 }
 
 export interface Epic {
   id: string;
   name: string;
   description: string;
+  edited_at?: string;
 }
 
 export interface FunctionalTest {

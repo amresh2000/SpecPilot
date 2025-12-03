@@ -156,4 +156,18 @@ export const api = {
 
     return response.data;
   },
+
+  async regenerateStoryTests(jobId: string, storyId: string): Promise<any> {
+    const response = await axios.post(
+      `${API_BASE_URL}/regenerate-story-tests/${jobId}/${storyId}`
+    );
+    return response.data;
+  },
+
+  async regenerateStoryEntities(jobId: string, storyId: string): Promise<any> {
+    const response = await axios.post(
+      `${API_BASE_URL}/regenerate-story-entities/${jobId}/${storyId}`
+    );
+    return response.data;
+  },
 };

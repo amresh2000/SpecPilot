@@ -473,6 +473,7 @@ async def update_epic(
             if epic.id == epic_id:
                 epic.name = name
                 epic.description = description
+                epic.edited_at = datetime.now()
                 epic_found = True
                 break
 
@@ -517,6 +518,8 @@ async def update_story(
                 story.role = role
                 story.goal = goal
                 story.benefit = benefit
+                story.edited_at = datetime.now()
+                story.regeneration_needed = True
                 story_found = True
                 break
 
@@ -569,6 +572,8 @@ async def update_acceptance_criteria(
                     )
                     for idx, text in enumerate(criteria_list)
                 ]
+                story.edited_at = datetime.now()
+                story.regeneration_needed = True
                 story_found = True
                 break
 
@@ -583,6 +588,299 @@ async def update_acceptance_criteria(
 
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid criteria JSON")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/regenerate-story-tests/{job_id}/{story_id}")
+async def regenerate_story_tests(
+    job_id: str,
+    story_id: str,
+    background_tasks: BackgroundTasks
+):
+    """Regenerate functional and Gherkin tests for a specific user story"""
+    try:
+        job = job_manager.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        # Find the story
+        story = None
+        for s in job.results.user_stories:
+            if s.id == story_id:
+                story = s
+                break
+
+        if not story:
+            raise HTTPException(status_code=404, detail="Story not found")
+
+        # Background task to regenerate tests
+        async def _regenerate_tests():
+            try:
+                from app.services.llm_client import BedrockLLMClient
+                from app.models import FunctionalTest, GherkinScenario
+
+                llm_client = BedrockLLMClient()
+
+                # Collect chunk IDs from the story
+                chunk_ids = set()
+                if story.source_chunks:
+                    chunk_ids.update(story.source_chunks)
+                for ac in story.acceptance_criteria:
+                    if ac.source_chunks:
+                        chunk_ids.update(ac.source_chunks)
+
+                # Retrieve chunk data from BRD
+                brd_chunks = []
+                if job.brd_data and chunk_ids:
+                    all_chunks = job.brd_data.get('chunks', [])
+                    brd_chunks = [c for c in all_chunks if c['id'] in chunk_ids]
+
+                # Get applied gap fixes
+                gap_fixes = []
+                if job.results.gap_fixes:
+                    for gf in job.results.gap_fixes:
+                        if gf.user_action == "accept":
+                            gap_fixes.append({
+                                "type": gf.gap_type,
+                                "issue": gf.issue,
+                                "correction": gf.suggestion
+                            })
+                        elif gf.user_action == "edit" and gf.final_text:
+                            gap_fixes.append({
+                                "type": gf.gap_type,
+                                "issue": gf.issue,
+                                "correction": gf.final_text
+                            })
+
+                # Regenerate functional tests for this story
+                functional_result = llm_client.generate_functional_tests(
+                    [story],
+                    job.instructions,
+                    brd_chunks if brd_chunks else None,
+                    gap_fixes
+                )
+
+                # Remove old tests for this story
+                job.results.functional_tests = [
+                    t for t in job.results.functional_tests
+                    if t.story_id != story_id
+                ]
+
+                # Add new tests with regeneration timestamp
+                for test_data in functional_result.get('functional_tests', []):
+                    test = FunctionalTest(**test_data)
+                    test.regenerated_at = datetime.now()
+                    job.results.functional_tests.append(test)
+
+                # Regenerate Gherkin tests for this story
+                gherkin_result = llm_client.generate_gherkin_tests([story], gap_fixes)
+
+                # Remove old Gherkin tests for this story
+                job.results.gherkin_tests = [
+                    t for t in job.results.gherkin_tests
+                    if t.story_id != story_id
+                ]
+
+                # Add new Gherkin tests with regeneration timestamp
+                for scenario_data in gherkin_result.get('gherkin_tests', []):
+                    scenario = GherkinScenario(**scenario_data)
+                    scenario.regenerated_at = datetime.now()
+                    job.results.gherkin_tests.append(scenario)
+
+                # Clear regeneration flag
+                story.regeneration_needed = False
+
+            except Exception as e:
+                print(f"Error regenerating tests for story {story_id}: {str(e)}")
+
+        # Add to background tasks
+        background_tasks.add_task(_regenerate_tests)
+
+        return {
+            "success": True,
+            "story_id": story_id,
+            "message": "Test regeneration started in background"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/regenerate-story-entities/{job_id}/{story_id}")
+async def regenerate_story_entities(
+    job_id: str,
+    story_id: str,
+    background_tasks: BackgroundTasks
+):
+    """Regenerate entities (data model) for affected stories"""
+    try:
+        job = job_manager.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        # Find the story
+        story = None
+        for s in job.results.user_stories:
+            if s.id == story_id:
+                story = s
+                break
+
+        if not story:
+            raise HTTPException(status_code=404, detail="Story not found")
+
+        # Background task to regenerate entities
+        async def _regenerate_entities():
+            try:
+                from app.services.llm_client import BedrockLLMClient
+                from app.models import Entity, EntityField
+
+                llm_client = BedrockLLMClient()
+
+                # Get applied gap fixes
+                gap_fixes = []
+                if job.results.gap_fixes:
+                    for gf in job.results.gap_fixes:
+                        if gf.user_action == "accept":
+                            gap_fixes.append({
+                                "type": gf.gap_type,
+                                "issue": gf.issue,
+                                "correction": gf.suggestion
+                            })
+                        elif gf.user_action == "edit" and gf.final_text:
+                            gap_fixes.append({
+                                "type": gf.gap_type,
+                                "issue": gf.issue,
+                                "correction": gf.final_text
+                            })
+
+                # Get all stories that need entity regeneration
+                stories_for_regen = [s for s in job.results.user_stories if s.regeneration_needed or s.id == story_id]
+
+                # Regenerate data model
+                result = llm_client.generate_data_model(
+                    job.brd_data,
+                    stories_for_regen,
+                    gap_fixes
+                )
+
+                # Remove old entities that were derived from affected stories
+                affected_story_ids = [s.id for s in stories_for_regen]
+                job.results.entities = [
+                    e for e in job.results.entities
+                    if not (e.source_story_ids and any(sid in affected_story_ids for sid in e.source_story_ids))
+                ]
+
+                # Add new entities with regeneration timestamp
+                for entity_data in result.get('entities', []):
+                    fields = []
+                    for field_data in entity_data.get('fields', []):
+                        field = EntityField(**field_data)
+                        fields.append(field)
+
+                    entity_data['fields'] = fields
+                    entity = Entity(**entity_data)
+                    entity.regenerated_at = datetime.now()
+                    entity.source_story_ids = affected_story_ids
+                    job.results.entities.append(entity)
+
+                # Update Mermaid diagram
+                job.results.mermaid = result.get('mermaid', '')
+
+            except Exception as e:
+                print(f"Error regenerating entities for story {story_id}: {str(e)}")
+
+        # Add to background tasks
+        background_tasks.add_task(_regenerate_entities)
+
+        return {
+            "success": True,
+            "story_id": story_id,
+            "message": "Entity regeneration started in background"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/cascade-analysis/{job_id}/{story_id}")
+async def analyze_cascade_impact(
+    job_id: str,
+    story_id: str
+):
+    """Analyze the impact of regenerating artifacts for a story"""
+    try:
+        job = job_manager.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        # Find the story
+        story = None
+        for s in job.results.user_stories:
+            if s.id == story_id:
+                story = s
+                break
+
+        if not story:
+            raise HTTPException(status_code=404, detail="Story not found")
+
+        from app.models import DependencyImpact
+
+        # Count affected artifacts
+        affected_functional_tests = len([
+            t for t in job.results.functional_tests
+            if t.story_id == story_id
+        ])
+
+        affected_gherkin_tests = len([
+            t for t in job.results.gherkin_tests
+            if t.story_id == story_id
+        ])
+
+        total_affected_tests = affected_functional_tests + affected_gherkin_tests
+
+        # Count affected entities (entities that mention this story)
+        affected_entities = len([
+            e for e in job.results.entities
+            if e.source_story_ids and story_id in e.source_story_ids
+        ])
+
+        # Estimate time (rough heuristic: 10 seconds per test, 15 seconds per entity)
+        estimated_time = (total_affected_tests * 10) + (affected_entities * 15)
+
+        # Determine risk level
+        risk_level = "low"
+        if total_affected_tests > 5 or affected_entities > 3:
+            risk_level = "medium"
+        if total_affected_tests > 10 or affected_entities > 5:
+            risk_level = "high"
+
+        impact = DependencyImpact(
+            affected_tests=total_affected_tests,
+            affected_entities=affected_entities,
+            affected_code=0,  # Future: analyze code skeleton impact
+            estimated_time_seconds=estimated_time,
+            risk_level=risk_level
+        )
+
+        return {
+            "success": True,
+            "story_id": story_id,
+            "story_title": story.title,
+            "impact": impact.dict(),
+            "details": {
+                "functional_tests": affected_functional_tests,
+                "gherkin_tests": affected_gherkin_tests,
+                "entities": affected_entities
+            }
+        }
+
     except HTTPException:
         raise
     except Exception as e:

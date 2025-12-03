@@ -56,12 +56,15 @@ class UserStory(BaseModel):
     benefit: str
     acceptance_criteria: List[AcceptanceCriterion]
     source_chunks: Optional[List[str]] = None
+    edited_at: Optional[datetime] = None
+    regeneration_needed: bool = False
 
 
 class Epic(BaseModel):
     id: str
     name: str
     description: str
+    edited_at: Optional[datetime] = None
 
 
 class FunctionalTest(BaseModel):
@@ -73,6 +76,7 @@ class FunctionalTest(BaseModel):
     test_steps: List[str]
     expected_results: List[str]
     source_chunks: Optional[List[str]] = None
+    regenerated_at: Optional[datetime] = None
 
 
 class GherkinScenario(BaseModel):
@@ -84,6 +88,7 @@ class GherkinScenario(BaseModel):
     when: List[str]
     then: List[str]
     source_chunks: Optional[List[str]] = None
+    regenerated_at: Optional[datetime] = None
 
 
 class EntityField(BaseModel):
@@ -96,6 +101,8 @@ class Entity(BaseModel):
     name: str
     description: str
     fields: List[EntityField]
+    regenerated_at: Optional[datetime] = None
+    source_story_ids: Optional[List[str]] = []
 
 
 class CodeFile(BaseModel):
@@ -154,6 +161,14 @@ class GenerationResults(BaseModel):
     code_skeleton: Optional[CodeSkeleton] = None
     validation_report: Optional[ValidationReport] = None
     gap_fixes: List[GapFix] = Field(default_factory=list)
+
+
+class DependencyImpact(BaseModel):
+    affected_tests: int = 0
+    affected_entities: int = 0
+    affected_code: int = 0
+    estimated_time_seconds: int = 0
+    risk_level: str = "low"  # low, medium, high
 
 
 class StatusResponse(BaseModel):

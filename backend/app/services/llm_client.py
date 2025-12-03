@@ -19,16 +19,25 @@ class BedrockLLMClient:
         # Use environment variable for region, fallback to parameter or default
         region = region_name or app_config.AWS_REGION
 
-        # Configure boto3 to disable automatic retries (we handle retries manually)
-        boto_config = Config(
-            retries={
+        # Configure boto3 with explicit proxy settings
+        boto_config_params = {
+            'retries': {
                 'max_attempts': 1,  # Disable boto3 automatic retries
                 'mode': 'standard'
             }
-        )
+        }
+
+        # Add explicit proxy configuration if configured
+        if app_config.HTTP_PROXY:
+            boto_config_params['proxies'] = {
+                'http': app_config.HTTP_PROXY,
+                'https': app_config.HTTPS_PROXY or app_config.HTTP_PROXY
+            }
+            print(f"Boto3 using explicit proxy: {app_config.HTTP_PROXY}")
+
+        boto_config = Config(**boto_config_params)
 
         # Create boto3 client with credentials from environment
-        # boto3 automatically uses HTTP_PROXY/HTTPS_PROXY from environment
         self.client = boto3.client(
             'bedrock-runtime',
             region_name=region,

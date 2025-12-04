@@ -55,9 +55,17 @@ class GenerationPipeline:
                 await self._generate_gherkin_tests()
                 await asyncio.sleep(10)  # Rate limiting delay (increased to 10 seconds)
 
-            # Step 6: Generate Code Skeleton
+            # Step 6: Generate Code Skeleton (Non-breaking - optional step)
             if job.artefacts.code_skeleton and job.results.entities:
-                await self._generate_code_skeleton()
+                try:
+                    await self._generate_code_skeleton()
+                except Exception as e:
+                    # Code generation is optional - don't fail entire pipeline
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Code skeleton generation failed (non-critical): {str(e)}")
+                    job.update_step("Generating Code Skeleton", StepStatus.FAILED)
+                    # Continue with other artifacts
 
             # Mark job as completed
             job_manager.update_job_status(self.job_id, JobStatus.COMPLETED)
@@ -242,18 +250,20 @@ class GenerationPipeline:
             raise RuntimeError(f"Failed to generate data model: {str(e)}")
 
     async def _generate_code_skeleton(self):
-        """Generate ASP.NET code skeleton"""
+        """Generate Java Selenium + Cucumber test automation framework"""
         job = job_manager.get_job(self.job_id)
         start_time = time.time()
 
         try:
             job.update_step("Generating Code Skeleton", StepStatus.RUNNING)
 
-            # Call LLM
+            # Call LLM with functional and gherkin tests for intelligent POM and glue code generation
             result = self.llm_client.generate_code_skeleton(
                 job.results.project_name,
                 job.results.entities,
-                self.gap_fixes
+                functional_tests=job.results.functional_tests,
+                gherkin_tests=job.results.gherkin_tests,
+                gap_fixes=self.gap_fixes
             )
 
             # Parse and store code skeleton
@@ -268,7 +278,11 @@ class GenerationPipeline:
 
         except Exception as e:
             job.update_step("Generating Code Skeleton", StepStatus.FAILED)
-            raise RuntimeError(f"Failed to generate code skeleton: {str(e)}")
+            # Don't raise - let it be handled by the calling code
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to generate code skeleton: {str(e)}", exc_info=True)
+            raise  # Re-raise so outer try-catch can handle gracefully
 
     def _build_tree_view(self, skeleton: CodeSkeleton) -> list:
         """Build a tree structure for frontend display"""

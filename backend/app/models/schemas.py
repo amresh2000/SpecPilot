@@ -116,7 +116,11 @@ class CodeFolder(BaseModel):
 
 
 class CodeSkeleton(BaseModel):
-    language: str = "dotnet"
+    language: str = "java"
+    framework: str = "selenium-cucumber"
+    build_tool: str = "maven"
+    test_framework: str = "junit5"
+    base_package: str = "com.cacib.project"
     root_folder: str
     folders: List[CodeFolder]
 

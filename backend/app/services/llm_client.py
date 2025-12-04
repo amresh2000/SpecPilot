@@ -369,38 +369,89 @@ Generate a Mermaid ER diagram showing entities and relationships.
         self,
         project_name: str,
         entities: List[Entity],
+        functional_tests: List[FunctionalTest] = None,
+        gherkin_tests: List[GherkinScenario] = None,
         gap_fixes: List[Dict[str, str]] = None
     ) -> Dict[str, Any]:
-        """Call E: Entities → ASP.NET Code Skeleton"""
+        """Generate Java Selenium + Cucumber test automation framework"""
+
+        # Import the helper
+        from app.services.java_code_generator import JavaCodeGenerator
+
+        # Initialize generator
+        generator = JavaCodeGenerator(project_name, "com.cacib")
 
         # Build gap fixes context
         gap_fixes_text = self._build_gap_fixes_context(gap_fixes)
 
+        # Format entities
         entities_text = "\n".join([
-            f"- {e.name}: {', '.join([f.name for f in e.fields])}"
+            f"- {e.name}: {', '.join([f'{field.name} ({field.type})' for field in e.fields])}"
             for e in entities
         ])
 
-        prompt = f"""Generate an ASP.NET Core API code skeleton for this project.
+        # Infer Page Objects from functional tests
+        page_objects_info = ""
+        if functional_tests:
+            page_objects = generator.infer_page_objects_from_functional_tests(functional_tests)
+            page_objects_info = "\n\nInferred Page Objects:\n" + "\n".join([
+                f"- {page_name}: Elements={len(data['elements'])}, Actions={len(data['actions'])}"
+                for page_name, data in page_objects.items()
+            ])
+
+        # Extract Gherkin steps for glue code
+        gherkin_steps_info = ""
+        unique_steps_count = 0
+        if gherkin_tests:
+            steps_mapping = generator.extract_gherkin_steps_mapping(gherkin_tests)
+            unique_steps_count = sum(len(steps) for steps in steps_mapping.values())
+            gherkin_steps_info = f"\n\nGherkin Steps to Implement:\n- Given steps: {len(steps_mapping['given'])}\n- When steps: {len(steps_mapping['when'])}\n- Then steps: {len(steps_mapping['then'])}\n- Total unique steps: {unique_steps_count}"
+
+        # Format functional tests summary
+        functional_tests_text = ""
+        if functional_tests:
+            functional_tests_text = f"\n\nFunctional Tests ({len(functional_tests)} tests):\n" + "\n".join([
+                f"- {test.title}: {len(test.test_steps)} steps"
+                for test in functional_tests[:5]  # Show first 5
+            ])
+
+        # Format Gherkin tests summary
+        gherkin_tests_text = ""
+        if gherkin_tests:
+            gherkin_tests_text = f"\n\nGherkin Scenarios ({len(gherkin_tests)} scenarios):\n" + "\n".join([
+                f"- Feature: {scenario.feature_name}\n  Scenario: {scenario.scenario_name}"
+                for scenario in gherkin_tests[:5]  # Show first 5
+            ])
+
+        prompt = f"""Generate a complete Java Selenium + Cucumber test automation framework.
 
 Project Name: {project_name}
+Base Package: {generator.base_package}
 
-Entities:
+Entities (for model classes):
 {entities_text}
+{page_objects_info}
+{gherkin_steps_info}
+{functional_tests_text}
+{gherkin_tests_text}
 {gap_fixes_text}
 
-Output must be valid JSON matching this schema:
+Output must be valid JSON matching this exact schema:
 {{
   "code_skeleton": {{
-    "language": "dotnet",
-    "root_folder": "src",
+    "language": "java",
+    "framework": "selenium-cucumber",
+    "build_tool": "maven",
+    "test_framework": "junit5",
+    "base_package": "{generator.base_package}",
+    "root_folder": "{generator.project_name}",
     "folders": [
       {{
-        "path": "src/ProjectName.Api/Controllers",
+        "path": "path/to/folder",
         "files": [
           {{
-            "name": "EntityController.cs",
-            "content": "using Microsoft.AspNetCore.Mvc;\\n\\nnamespace ProjectName.Api.Controllers\\n{{\\n    [ApiController]\\n    [Route(\\"api/[controller]\\")]\\n    public class EntityController : ControllerBase\\n    {{\\n        // TODO: Implement CRUD operations\\n    }}\\n}}"
+            "name": "FileName.java",
+            "content": "package content here..."
           }}
         ]
       }}
@@ -408,17 +459,153 @@ Output must be valid JSON matching this schema:
   }}
 }}
 
-Generate:
-1. Controllers for each entity (CRUD endpoints)
-2. Models/DTOs
-3. Services/Repository interfaces
-4. Program.cs and Startup configuration
-5. appsettings.json
+CRITICAL INSTRUCTIONS:
+1. Generate COMPLETE, WORKING Java code - not TODOs or placeholders
+2. Use proper Selenium 4.x, Cucumber 7.x, JUnit 5 patterns
+3. Follow Page Object Model (POM) pattern strictly
+4. Generate smart glue code with reusable methods and proper parameterization
+5. Use @FindBy annotations in Page Objects
+6. Implement WebDriverWait for robust element interactions
+7. Use proper Cucumber expressions (@Given, @When, @Then) with regex for parameters
 
-Use proper ASP.NET Core 8.0 patterns and structure.
+REQUIRED FILES TO GENERATE:
+
+A. Maven Configuration:
+   - pom.xml (with Selenium 4.18.1, Cucumber 7.15.0, JUnit 5.10.1, WebDriverManager 5.6.3)
+
+B. Entity/Model Classes (from entities list):
+   - src/main/java/{generator.base_package.replace('.', '/')}/models/*.java
+
+C. Page Object Model Classes (inferred from tests):
+   - src/main/java/{generator.base_package.replace('.', '/')}/pages/*.java
+   - Include @FindBy annotations, constructor with WebDriver, element locators
+
+D. Cucumber Step Definitions (glue code for each Gherkin scenario):
+   - src/test/java/{generator.base_package.replace('.', '/')}/stepdefinitions/*.java
+   - Implement methods for Given/When/Then steps with proper Cucumber expressions
+   - Use Page Objects in step definitions
+   - Add proper assertions using JUnit5 Assertions
+
+E. Gherkin Feature Files:
+   - src/test/resources/features/*.feature
+   - One feature file per feature from gherkin_tests
+
+F. Test Runner:
+   - src/test/java/{generator.base_package.replace('.', '/')}/runners/TestRunner.java
+   - Configure Cucumber with proper plugin and glue options
+
+G. Utility Classes:
+   - src/main/java/{generator.base_package.replace('.', '/')}/utils/DriverManager.java (WebDriver management with WebDriverManager)
+   - src/main/java/{generator.base_package.replace('.', '/')}/utils/ConfigReader.java (Properties file reader)
+   - src/main/java/{generator.base_package.replace('.', '/')}/utils/WaitHelper.java (WebDriverWait utilities)
+
+H. Configuration Files:
+   - src/test/resources/config.properties (baseUrl, browser, timeouts)
+   - src/test/resources/junit-platform.properties (JUnit config)
+
+I. Documentation:
+   - README.md (setup instructions, how to run tests)
+
+EXAMPLE Page Object (LoginPage.java):
+```java
+package {generator.base_package}.pages;
+
+import org.openqa.selenium.WebDriver;
+import org.openqa.selenium.WebElement;
+import org.openqa.selenium.support.FindBy;
+import org.openqa.selenium.support.PageFactory;
+import {generator.base_package}.utils.WaitHelper;
+
+public class LoginPage {{
+    private WebDriver driver;
+    private WaitHelper waitHelper;
+
+    @FindBy(id = "email")
+    private WebElement emailField;
+
+    @FindBy(id = "password")
+    private WebElement passwordField;
+
+    @FindBy(css = "button[type='submit']")
+    private WebElement loginButton;
+
+    public LoginPage(WebDriver driver) {{
+        this.driver = driver;
+        this.waitHelper = new WaitHelper(driver);
+        PageFactory.initElements(driver, this);
+    }}
+
+    public void enterEmail(String email) {{
+        waitHelper.waitForElement(emailField);
+        emailField.clear();
+        emailField.sendKeys(email);
+    }}
+
+    public void enterPassword(String password) {{
+        waitHelper.waitForElement(passwordField);
+        passwordField.clear();
+        passwordField.sendKeys(password);
+    }}
+
+    public void clickLogin() {{
+        waitHelper.waitForElementToBeClickable(loginButton);
+        loginButton.click();
+    }}
+
+    public void login(String email, String password) {{
+        enterEmail(email);
+        enterPassword(password);
+        clickLogin();
+    }}
+}}
+```
+
+EXAMPLE Step Definition (LoginSteps.java):
+```java
+package {generator.base_package}.stepdefinitions;
+
+import io.cucumber.java.en.Given;
+import io.cucumber.java.en.When;
+import io.cucumber.java.en.Then;
+import org.openqa.selenium.WebDriver;
+import {generator.base_package}.pages.LoginPage;
+import {generator.base_package}.pages.DashboardPage;
+import {generator.base_package}.utils.DriverManager;
+import static org.junit.jupiter.api.Assertions.*;
+
+public class LoginSteps {{
+    private WebDriver driver;
+    private LoginPage loginPage;
+    private DashboardPage dashboardPage;
+
+    public LoginSteps() {{
+        this.driver = DriverManager.getDriver();
+    }}
+
+    @Given("I am on the login page")
+    public void i_am_on_the_login_page() {{
+        driver.get(ConfigReader.getProperty("baseUrl") + "/login");
+        loginPage = new LoginPage(driver);
+    }}
+
+    @When("I enter email {{string}} and password {{string}}")
+    public void i_enter_email_and_password(String email, String password) {{
+        loginPage.login(email, password);
+    }}
+
+    @Then("I should see the dashboard")
+    public void i_should_see_dashboard() {{
+        dashboardPage = new DashboardPage(driver);
+        assertTrue(driver.getCurrentUrl().contains("/dashboard"), "Dashboard URL not found");
+        assertTrue(dashboardPage.isDashboardDisplayed(), "Dashboard not displayed");
+    }}
+}}
+```
+
+Generate ALL files as complete, working code. No TODOs. No placeholders. Production-ready test automation framework.
 """
 
-        system_prompt = "You are an expert .NET architect. Output only valid JSON, no markdown formatting."
+        system_prompt = "You are an expert Java test automation architect specializing in Selenium and Cucumber. Generate complete, production-ready code. Output only valid JSON with no markdown formatting."
 
         return self._invoke_claude(prompt, system_prompt)
 

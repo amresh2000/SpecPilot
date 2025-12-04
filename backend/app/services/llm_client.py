@@ -45,8 +45,9 @@ class BedrockLLMClient:
             aws_secret_access_key=app_config.AWS_SECRET_ACCESS_KEY,
             config=boto_config
         )
-        # Use inference profile ID for Claude 3.5 Sonnet v2 (required for on-demand throughput)
-        self.model_id = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+        # Use model ID from configuration
+        self.model_id = app_config.AWS_BEDROCK_MODEL_ID
+        print(f"Using Bedrock model: {self.model_id}")
         self.max_retries = 5  # Increased from 1 to 5
         self.base_delay = 2  # Base delay in seconds for exponential backoff
 

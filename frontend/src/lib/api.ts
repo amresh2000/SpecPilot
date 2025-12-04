@@ -170,4 +170,34 @@ export const api = {
     );
     return response.data;
   },
+
+  async deleteEpic(jobId: string, epicId: string): Promise<any> {
+    const response = await axios.delete(
+      `${API_BASE_URL}/delete-epic/${jobId}/${epicId}`
+    );
+    return response.data;
+  },
+
+  async deleteStory(jobId: string, storyId: string): Promise<any> {
+    const response = await axios.delete(
+      `${API_BASE_URL}/delete-story/${jobId}/${storyId}`
+    );
+    return response.data;
+  },
+
+  async deleteTest(jobId: string, testId: string, testType: 'functional' | 'gherkin'): Promise<any> {
+    const formData = new FormData();
+    formData.append('test_type', testType);
+
+    const response = await axios.delete(
+      `${API_BASE_URL}/delete-test/${jobId}/${testId}`,
+      {
+        data: formData,
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      }
+    );
+    return response.data;
+  },
 };

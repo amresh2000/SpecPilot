@@ -22,6 +22,7 @@ export const EditableStory: React.FC<EditableStoryProps> = ({ story, jobId, onUp
   const [newCriterion, setNewCriterion] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const toast = useToast();
 
   const handleAddCriterion = () => {
@@ -105,6 +106,23 @@ export const EditableStory: React.FC<EditableStoryProps> = ({ story, jobId, onUp
     }
   };
 
+  const handleDelete = async () => {
+    if (!confirm(`Are you sure you want to delete story "${story.title}" and all its associated tests?`)) {
+      return;
+    }
+
+    setIsDeleting(true);
+    try {
+      await api.deleteStory(jobId, story.id);
+      toast.success('Story and associated tests deleted successfully');
+      onUpdate(); // Refresh data
+    } catch (error) {
+      toast.error('Failed to delete story');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   return (
     <div className={`border-l-4 ${story.regeneration_needed ? 'border-orange-500 bg-orange-50' : 'border-blue-500'} pl-4 py-2 rounded-r-lg`}>
       {story.regeneration_needed && (
@@ -141,10 +159,19 @@ export const EditableStory: React.FC<EditableStoryProps> = ({ story, jobId, onUp
             )}
             <button
               onClick={() => setIsEditMode(true)}
-              className="p-1 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+              disabled={isDeleting}
+              className="p-1 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors disabled:opacity-50"
               title="Edit story"
             >
               <Edit2 className="w-4 h-4" />
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={isDeleting || isRegenerating}
+              className="p-1 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50"
+              title="Delete story and all tests"
+            >
+              <Trash2 className={`w-4 h-4 ${isDeleting ? 'animate-pulse' : ''}`} />
             </button>
           </div>
         )}

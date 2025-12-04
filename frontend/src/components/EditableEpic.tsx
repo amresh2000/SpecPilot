@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from './ui/Card';
-import { Edit2, Check, X } from 'lucide-react';
+import { Edit2, Check, X, Trash2 } from 'lucide-react';
 import { EditableText } from './EditableText';
 import { useToast } from './ui/ToastContainer';
 import { api } from '../lib/api';
@@ -18,6 +18,7 @@ export const EditableEpic: React.FC<EditableEpicProps> = ({ epic, jobId, onUpdat
   const [editedName, setEditedName] = useState(epic.name);
   const [editedDescription, setEditedDescription] = useState(epic.description);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const toast = useToast();
 
   const handleSave = async () => {
@@ -43,6 +44,23 @@ export const EditableEpic: React.FC<EditableEpicProps> = ({ epic, jobId, onUpdat
     setEditedName(epic.name);
     setEditedDescription(epic.description);
     setIsEditMode(false);
+  };
+
+  const handleDelete = async () => {
+    if (!confirm(`Are you sure you want to delete epic "${epic.name}" and all its associated stories?`)) {
+      return;
+    }
+
+    setIsDeleting(true);
+    try {
+      await api.deleteEpic(jobId, epic.id);
+      toast.success('Epic and associated stories deleted successfully');
+      onUpdate(); // Refresh data
+    } catch (error) {
+      toast.error('Failed to delete epic');
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   return (
@@ -103,13 +121,24 @@ export const EditableEpic: React.FC<EditableEpicProps> = ({ epic, jobId, onUpdat
             )}
           </div>
           {!isEditMode && (
-            <button
-              onClick={() => setIsEditMode(true)}
-              className="ml-4 p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-              title="Edit epic"
-            >
-              <Edit2 className="w-4 h-4" />
-            </button>
+            <div className="flex gap-2 ml-4">
+              <button
+                onClick={() => setIsEditMode(true)}
+                disabled={isDeleting}
+                className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors disabled:opacity-50"
+                title="Edit epic"
+              >
+                <Edit2 className="w-4 h-4" />
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={isDeleting}
+                className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50"
+                title="Delete epic and all stories"
+              >
+                <Trash2 className={`w-4 h-4 ${isDeleting ? 'animate-pulse' : ''}`} />
+              </button>
+            </div>
           )}
         </div>
       </CardHeader>

@@ -3,6 +3,7 @@ import json
 import shutil
 import tempfile
 import asyncio
+from datetime import datetime
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
@@ -879,6 +880,167 @@ async def analyze_cascade_impact(
                 "gherkin_tests": affected_gherkin_tests,
                 "entities": affected_entities
             }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/delete-epic/{job_id}/{epic_id}")
+async def delete_epic(
+    job_id: str,
+    epic_id: str
+):
+    """Delete an epic and all its associated stories"""
+    try:
+        job = job_manager.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        # Find epic
+        epic_found = False
+        for epic in job.results.epics:
+            if epic.id == epic_id:
+                epic_found = True
+                break
+
+        if not epic_found:
+            raise HTTPException(status_code=404, detail="Epic not found")
+
+        # Delete the epic
+        job.results.epics = [e for e in job.results.epics if e.id != epic_id]
+
+        # Delete all stories associated with this epic
+        deleted_story_ids = [s.id for s in job.results.user_stories if s.epic_id == epic_id]
+        job.results.user_stories = [s for s in job.results.user_stories if s.epic_id != epic_id]
+
+        # Delete all tests associated with deleted stories
+        job.results.functional_tests = [
+            t for t in job.results.functional_tests
+            if t.story_id not in deleted_story_ids
+        ]
+        job.results.gherkin_tests = [
+            t for t in job.results.gherkin_tests
+            if t.story_id not in deleted_story_ids
+        ]
+
+        return {
+            "success": True,
+            "epic_id": epic_id,
+            "deleted_stories_count": len(deleted_story_ids),
+            "message": f"Epic and {len(deleted_story_ids)} associated stories deleted"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/delete-story/{job_id}/{story_id}")
+async def delete_story(
+    job_id: str,
+    story_id: str
+):
+    """Delete a user story and all its associated tests"""
+    try:
+        job = job_manager.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        # Find story
+        story_found = False
+        for story in job.results.user_stories:
+            if story.id == story_id:
+                story_found = True
+                break
+
+        if not story_found:
+            raise HTTPException(status_code=404, detail="Story not found")
+
+        # Delete the story
+        job.results.user_stories = [s for s in job.results.user_stories if s.id != story_id]
+
+        # Delete associated tests
+        functional_tests_deleted = len([t for t in job.results.functional_tests if t.story_id == story_id])
+        gherkin_tests_deleted = len([t for t in job.results.gherkin_tests if t.story_id == story_id])
+
+        job.results.functional_tests = [
+            t for t in job.results.functional_tests
+            if t.story_id != story_id
+        ]
+        job.results.gherkin_tests = [
+            t for t in job.results.gherkin_tests
+            if t.story_id != story_id
+        ]
+
+        return {
+            "success": True,
+            "story_id": story_id,
+            "deleted_functional_tests": functional_tests_deleted,
+            "deleted_gherkin_tests": gherkin_tests_deleted,
+            "message": f"Story deleted with {functional_tests_deleted} functional and {gherkin_tests_deleted} Gherkin tests"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/delete-test/{job_id}/{test_id}")
+async def delete_test(
+    job_id: str,
+    test_id: str,
+    test_type: str = Form(...)  # "functional" or "gherkin"
+):
+    """Delete a functional or Gherkin test"""
+    try:
+        job = job_manager.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        test_found = False
+
+        if test_type == "functional":
+            # Find and delete functional test
+            for test in job.results.functional_tests:
+                if test.id == test_id:
+                    test_found = True
+                    break
+
+            if test_found:
+                job.results.functional_tests = [
+                    t for t in job.results.functional_tests
+                    if t.id != test_id
+                ]
+
+        elif test_type == "gherkin":
+            # Find and delete gherkin test
+            for test in job.results.gherkin_tests:
+                if test.id == test_id:
+                    test_found = True
+                    break
+
+            if test_found:
+                job.results.gherkin_tests = [
+                    t for t in job.results.gherkin_tests
+                    if t.id != test_id
+                ]
+
+        else:
+            raise HTTPException(status_code=400, detail="Invalid test_type. Must be 'functional' or 'gherkin'")
+
+        if not test_found:
+            raise HTTPException(status_code=404, detail=f"{test_type.capitalize()} test not found")
+
+        return {
+            "success": True,
+            "test_id": test_id,
+            "test_type": test_type,
+            "message": f"{test_type.capitalize()} test deleted successfully"
         }
 
     except HTTPException:

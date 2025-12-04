@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/Button';
 import { ProgressStepper } from '@/components/ui/ProgressStepper';
 import { EditableEpic } from '@/components/EditableEpic';
 import { EditableStory } from '@/components/EditableStory';
+import { EditableFunctionalTest } from '@/components/EditableFunctionalTest';
+import { EditableGherkinTest } from '@/components/EditableGherkinTest';
 import { api } from '@/lib/api';
 import { getSteps } from '@/lib/steps';
 import type { StatusResponse } from '@/types';
@@ -244,47 +246,12 @@ export const ResultsPage: React.FC = () => {
             <div className="space-y-6">
               <h2 className="text-2xl font-bold text-gray-900">Functional Tests</h2>
               {results.functional_tests.map((test) => (
-                <Card key={test.id}>
-                  <CardHeader>
-                    <CardTitle className="text-lg">{test.title}</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div>
-                      <p className="text-sm font-medium text-gray-700">Objective:</p>
-                      <p className="text-sm text-gray-600">{test.objective}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-gray-700 mb-2">Preconditions:</p>
-                      <ul className="list-disc list-inside space-y-1">
-                        {test.preconditions.map((pc, idx) => (
-                          <li key={idx} className="text-sm text-gray-600">
-                            {pc}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-gray-700 mb-2">Test Steps:</p>
-                      <ol className="list-decimal list-inside space-y-1">
-                        {test.test_steps.map((step, idx) => (
-                          <li key={idx} className="text-sm text-gray-600">
-                            {step}
-                          </li>
-                        ))}
-                      </ol>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-gray-700 mb-2">Expected Results:</p>
-                      <ul className="list-disc list-inside space-y-1">
-                        {test.expected_results.map((result, idx) => (
-                          <li key={idx} className="text-sm text-gray-600">
-                            {result}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  </CardContent>
-                </Card>
+                <EditableFunctionalTest
+                  key={test.id}
+                  test={test}
+                  jobId={jobId!}
+                  onUpdate={fetchStatus}
+                />
               ))}
             </div>
           )}
@@ -293,31 +260,12 @@ export const ResultsPage: React.FC = () => {
             <div className="space-y-6">
               <h2 className="text-2xl font-bold text-gray-900">Gherkin Tests</h2>
               {results.gherkin_tests.map((scenario) => (
-                <Card key={scenario.id}>
-                  <CardHeader>
-                    <CardTitle className="text-lg">Feature: {scenario.feature_name}</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <pre className="bg-gray-50 p-4 rounded-md text-sm overflow-x-auto">
-                      <div className="font-semibold">Scenario: {scenario.scenario_name}</div>
-                      {scenario.given.map((g, idx) => (
-                        <div key={idx} className="ml-2">
-                          Given {g}
-                        </div>
-                      ))}
-                      {scenario.when.map((w, idx) => (
-                        <div key={idx} className="ml-2">
-                          When {w}
-                        </div>
-                      ))}
-                      {scenario.then.map((t, idx) => (
-                        <div key={idx} className="ml-2">
-                          Then {t}
-                        </div>
-                      ))}
-                    </pre>
-                  </CardContent>
-                </Card>
+                <EditableGherkinTest
+                  key={scenario.id}
+                  scenario={scenario}
+                  jobId={jobId!}
+                  onUpdate={fetchStatus}
+                />
               ))}
             </div>
           )}

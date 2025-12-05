@@ -194,9 +194,11 @@ class GenerationPipeline:
         try:
             job.update_step("Generating Gherkin Tests", StepStatus.RUNNING)
 
-            # Call LLM
+            # Call LLM with functional tests as context
             result = self.llm_client.generate_gherkin_tests(
                 job.results.user_stories,
+                job.results.functional_tests,
+                "",  # No additional instructions in pipeline
                 self.gap_fixes
             )
 
@@ -257,13 +259,11 @@ class GenerationPipeline:
         try:
             job.update_step("Generating Code Skeleton", StepStatus.RUNNING)
 
-            # Call LLM with functional and gherkin tests for intelligent POM and glue code generation
+            # Call LLM with ALL gherkin tests and entities for POM and glue code generation
             result = self.llm_client.generate_code_skeleton(
                 job.results.project_name,
                 job.results.entities,
-                functional_tests=job.results.functional_tests,
-                gherkin_tests=job.results.gherkin_tests,
-                gap_fixes=self.gap_fixes
+                gherkin_tests=job.results.gherkin_tests
             )
 
             # Parse and store code skeleton

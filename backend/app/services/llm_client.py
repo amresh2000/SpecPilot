@@ -19,12 +19,13 @@ class BedrockLLMClient:
         # Use environment variable for region, fallback to parameter or default
         region = region_name or app_config.AWS_REGION
 
-        # Configure boto3 with explicit proxy settings
+        # Configure boto3 with explicit proxy settings and increased timeout
         boto_config_params = {
             'retries': {
                 'max_attempts': 1,  # Disable boto3 automatic retries
                 'mode': 'standard'
-            }
+            },
+            'read_timeout': 300  # Increase from default 60s to 300s (5 minutes) for large code generation
         }
 
         # Add explicit proxy configuration if configured
@@ -62,7 +63,7 @@ class BedrockLLMClient:
 
                 request_body = {
                     "anthropic_version": "bedrock-2023-05-31",
-                    "max_tokens": 4096,
+                    "max_tokens": 16384,  # Increased from 4096 to allow larger code generation responses
                     "messages": messages,
                     "temperature": 0.7,
                 }
@@ -121,12 +122,22 @@ class BedrockLLMClient:
         self,
         brd_data: Dict[str, Any],
         instructions: str,
-        gap_fixes: List[Dict[str, str]] = None
+        gap_fixes: List[Dict[str, str]] = None,
+        existing_epics: List[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         """Call A: BRD → project_name + epics + user stories"""
 
         # Build gap fixes context
         gap_fixes_text = self._build_gap_fixes_context(gap_fixes)
+
+        # Build existing epics exclusion context
+        existing_epics_text = ""
+        if existing_epics and len(existing_epics) > 0:
+            existing_epics_text = "\n\n## EXISTING EPICS (DO NOT DUPLICATE)\n"
+            existing_epics_text += "The following epics already exist. Generate NEW epics only, avoiding duplication:\n\n"
+            for i, epic in enumerate(existing_epics, 1):
+                existing_epics_text += f"{i}. {epic['name']}: {epic['description']}\n"
+            existing_epics_text += "\nIMPORTANT: Do not regenerate these epics or create similar ones. Focus on NEW features.\n"
 
         # Prepare context from BRD
         chunks = brd_data.get('chunks', [])
@@ -159,6 +170,7 @@ BRD Content:
 
 {tables_text if tables_text else ''}
 {gap_fixes_text}
+{existing_epics_text}
 Special Instructions:
 {instructions if instructions else 'None'}
 
@@ -266,9 +278,11 @@ Each test should be detailed, specific, and cover the acceptance criteria.
     def generate_gherkin_tests(
         self,
         user_stories: List[UserStory],
+        functional_tests: List[FunctionalTest] = None,
+        instructions: str = "",
         gap_fixes: List[Dict[str, str]] = None
     ) -> Dict[str, Any]:
-        """Call C: User Stories → Gherkin scenarios"""
+        """Call C: User Stories + Functional Tests → Gherkin scenarios"""
 
         # Build gap fixes context
         gap_fixes_text = self._build_gap_fixes_context(gap_fixes)
@@ -281,11 +295,24 @@ Each test should be detailed, specific, and cover the acceptance criteria.
             for s in user_stories
         ])
 
+        # Include functional tests as context for Gherkin generation
+        functional_tests_text = ""
+        if functional_tests:
+            functional_tests_text = "\n\nFunctional Tests (for reference):\n"
+            for test in functional_tests:
+                functional_tests_text += f"\n{test.title}:\n"
+                functional_tests_text += f"Objective: {test.objective}\n"
+                functional_tests_text += f"Steps: {', '.join(test.test_steps[:3])}{'...' if len(test.test_steps) > 3 else ''}\n"
+
         prompt = f"""Generate Gherkin BDD scenarios for these user stories.
 
 User Stories:
 {stories_text}
+{functional_tests_text}
 {gap_fixes_text}
+
+Special Instructions:
+{instructions if instructions else 'None'}
 
 Output must be valid JSON matching this schema:
 {{
@@ -369,11 +396,9 @@ Generate a Mermaid ER diagram showing entities and relationships.
         self,
         project_name: str,
         entities: List[Entity],
-        functional_tests: List[FunctionalTest] = None,
-        gherkin_tests: List[GherkinScenario] = None,
-        gap_fixes: List[Dict[str, str]] = None
+        gherkin_tests: List[GherkinScenario] = None
     ) -> Dict[str, Any]:
-        """Generate Java Selenium + Cucumber test automation framework"""
+        """Generate Java Selenium + Cucumber test automation framework based on Gherkin tests and entities"""
 
         # Import the helper
         from app.services.java_code_generator import JavaCodeGenerator
@@ -381,23 +406,11 @@ Generate a Mermaid ER diagram showing entities and relationships.
         # Initialize generator
         generator = JavaCodeGenerator(project_name, "com.cacib")
 
-        # Build gap fixes context
-        gap_fixes_text = self._build_gap_fixes_context(gap_fixes)
-
-        # Format entities
+        # Format entities for model classes
         entities_text = "\n".join([
             f"- {e.name}: {', '.join([f'{field.name} ({field.type})' for field in e.fields])}"
             for e in entities
         ])
-
-        # Infer Page Objects from functional tests
-        page_objects_info = ""
-        if functional_tests:
-            page_objects = generator.infer_page_objects_from_functional_tests(functional_tests)
-            page_objects_info = "\n\nInferred Page Objects:\n" + "\n".join([
-                f"- {page_name}: Elements={len(data['elements'])}, Actions={len(data['actions'])}"
-                for page_name, data in page_objects.items()
-            ])
 
         # Extract Gherkin steps for glue code
         gherkin_steps_info = ""
@@ -407,21 +420,20 @@ Generate a Mermaid ER diagram showing entities and relationships.
             unique_steps_count = sum(len(steps) for steps in steps_mapping.values())
             gherkin_steps_info = f"\n\nGherkin Steps to Implement:\n- Given steps: {len(steps_mapping['given'])}\n- When steps: {len(steps_mapping['when'])}\n- Then steps: {len(steps_mapping['then'])}\n- Total unique steps: {unique_steps_count}"
 
-        # Format functional tests summary
-        functional_tests_text = ""
-        if functional_tests:
-            functional_tests_text = f"\n\nFunctional Tests ({len(functional_tests)} tests):\n" + "\n".join([
-                f"- {test.title}: {len(test.test_steps)} steps"
-                for test in functional_tests[:5]  # Show first 5
-            ])
-
-        # Format Gherkin tests summary
+        # Format ALL Gherkin tests in detail (not just summary)
         gherkin_tests_text = ""
         if gherkin_tests:
-            gherkin_tests_text = f"\n\nGherkin Scenarios ({len(gherkin_tests)} scenarios):\n" + "\n".join([
-                f"- Feature: {scenario.feature_name}\n  Scenario: {scenario.scenario_name}"
-                for scenario in gherkin_tests[:5]  # Show first 5
-            ])
+            gherkin_tests_text = f"\n\nComplete Gherkin Scenarios ({len(gherkin_tests)} scenarios):\n\n"
+            for idx, scenario in enumerate(gherkin_tests, 1):
+                gherkin_tests_text += f"{idx}. Feature: {scenario.feature_name}\n"
+                gherkin_tests_text += f"   Scenario: {scenario.scenario_name}\n"
+                for given_step in scenario.given:
+                    gherkin_tests_text += f"     Given {given_step}\n"
+                for when_step in scenario.when:
+                    gherkin_tests_text += f"     When {when_step}\n"
+                for then_step in scenario.then:
+                    gherkin_tests_text += f"     Then {then_step}\n"
+                gherkin_tests_text += "\n"
 
         prompt = f"""Generate a complete Java Selenium + Cucumber test automation framework.
 
@@ -430,11 +442,8 @@ Base Package: {generator.base_package}
 
 Entities (for model classes):
 {entities_text}
-{page_objects_info}
 {gherkin_steps_info}
-{functional_tests_text}
 {gherkin_tests_text}
-{gap_fixes_text}
 
 Output must be valid JSON matching this exact schema:
 {{

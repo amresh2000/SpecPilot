@@ -167,16 +167,33 @@ class GenerationResults(BaseModel):
     gap_fixes: List[GapFix] = Field(default_factory=list)
 
 
-class DependencyImpact(BaseModel):
-    affected_tests: int = 0
-    affected_entities: int = 0
-    affected_code: int = 0
-    estimated_time_seconds: int = 0
-    risk_level: str = "low"  # low, medium, high
+class PipelineStage(str, Enum):
+    VALIDATION = "validation"
+    EPICS = "epics"
+    FUNCTIONAL_TESTS = "functional_tests"
+    GHERKIN_TESTS = "gherkin_tests"
+    DATA_MODEL = "data_model"
+    CODE_GENERATION = "code_generation"
+    COMPLETED = "completed"
+
+
+class StageState(BaseModel):
+    stage: PipelineStage
+    status: StepStatus
+    completed_at: Optional[datetime] = None
+    user_approved: bool = False
+
+
+class GenerateMoreRequest(BaseModel):
+    stage: PipelineStage
+    instructions: str
+    context_ids: List[str] = []
 
 
 class StatusResponse(BaseModel):
     status: JobStatus
+    current_stage: Optional[PipelineStage] = None
+    stage_history: List[StageState] = []
     error: Optional[str] = None
     steps: List[Step]
     results: GenerationResults

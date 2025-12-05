@@ -1,11 +1,14 @@
 import uuid
-from typing import Dict, Optional
+from typing import Dict, Optional, List
+from datetime import datetime
 from app.models import (
     JobStatus,
     StepStatus,
     Step,
     GenerationResults,
     ArtefactsConfig,
+    PipelineStage,
+    StageState,
 )
 
 
@@ -20,6 +23,9 @@ class Job:
         self.results = GenerationResults()
         self.brd_data: Optional[Dict] = None
         self.uploaded_filename: Optional[str] = None
+        # Staged pipeline fields
+        self.current_stage: Optional[PipelineStage] = None
+        self.stage_history: List[StageState] = []
 
     def add_step(self, name: str) -> Step:
         step = Step(name=name, status=StepStatus.PENDING)
@@ -37,6 +43,31 @@ class Job:
     def mark_failed(self, error: str):
         self.status = JobStatus.FAILED
         self.error = error
+
+    def advance_stage(self, next_stage: PipelineStage):
+        """Advance to next pipeline stage"""
+        if self.current_stage:
+            # Mark current stage as completed
+            for state in self.stage_history:
+                if state.stage == self.current_stage:
+                    state.status = StepStatus.COMPLETED
+                    state.completed_at = datetime.now()
+                    state.user_approved = True
+
+        # Add new stage
+        self.current_stage = next_stage
+        self.stage_history.append(StageState(
+            stage=next_stage,
+            status=StepStatus.RUNNING
+        ))
+
+    def complete_current_stage(self):
+        """Mark current stage as completed"""
+        if self.current_stage:
+            for state in self.stage_history:
+                if state.stage == self.current_stage:
+                    state.status = StepStatus.COMPLETED
+                    state.completed_at = datetime.now()
 
 
 class JobManager:

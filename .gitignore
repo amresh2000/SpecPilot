@@ -45,6 +45,7 @@ docs/archive/
 .claude/
 *.code-workspace
 .cursor/
+.playwright-mcp/
 
 # Test files
 *.test.local.*

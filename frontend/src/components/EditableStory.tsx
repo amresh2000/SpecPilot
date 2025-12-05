@@ -123,9 +123,13 @@ export const EditableStory: React.FC<EditableStoryProps> = ({ story, jobId, onUp
     }
   };
 
+  // Check if any tests exist for this story (functional or gherkin)
+  const hasTests = story.has_functional_tests || story.has_gherkin_tests;
+  const showRegenerationWarning = story.regeneration_needed && hasTests;
+
   return (
-    <div className={`border-l-4 ${story.regeneration_needed ? 'border-orange-500 bg-orange-50' : 'border-blue-500'} pl-4 py-2 rounded-r-lg`}>
-      {story.regeneration_needed && (
+    <div className={`border-l-4 ${showRegenerationWarning ? 'border-orange-500 bg-orange-50' : 'border-blue-500'} pl-4 py-2 rounded-r-lg`}>
+      {showRegenerationWarning && (
         <div className="mb-2 flex items-center gap-2 text-sm text-orange-700 bg-orange-100 p-2 rounded">
           <AlertCircle className="w-4 h-4" />
           <span className="font-medium">Story edited - tests need regeneration</span>
@@ -147,7 +151,7 @@ export const EditableStory: React.FC<EditableStoryProps> = ({ story, jobId, onUp
         </div>
         {!isEditMode && (
           <div className="flex gap-2 ml-2">
-            {story.regeneration_needed && (
+            {showRegenerationWarning && (
               <button
                 onClick={handleRegenerateTests}
                 disabled={isRegenerating}

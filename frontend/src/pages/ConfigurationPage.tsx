@@ -2,11 +2,8 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
-import { ProgressStepper } from '@/components/ui/ProgressStepper';
 import { useToast } from '@/components/ui/ToastContainer';
 import { api } from '@/lib/api';
-import { getSteps } from '@/lib/steps';
-import type { ArtefactsConfig } from '@/types';
 import { Upload, Loader2 } from 'lucide-react';
 
 export const ConfigurationPage: React.FC = () => {
@@ -14,13 +11,6 @@ export const ConfigurationPage: React.FC = () => {
   const toast = useToast();
   const [file, setFile] = useState<File | null>(null);
   const [instructions, setInstructions] = useState('');
-  const [artefacts, setArtefacts] = useState<ArtefactsConfig>({
-    epics_and_stories: true,
-    functional_tests: true,
-    gherkin_tests: true,
-    data_model: true,
-    code_skeleton: true,
-  });
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -57,8 +47,17 @@ export const ConfigurationPage: React.FC = () => {
     toast.info('Uploading and validating BRD...');
 
     try {
-      // Call validation API
-      const result = await api.validateBRD(file, { instructions, artefacts });
+      // Call validation API with all artefacts enabled by default
+      const result = await api.validateBRD(file, {
+        instructions,
+        artefacts: {
+          epics_and_stories: true,
+          functional_tests: true,
+          gherkin_tests: true,
+          data_model: true,
+          code_skeleton: true,
+        }
+      });
 
       toast.success('BRD validation complete!');
 
@@ -83,14 +82,9 @@ export const ConfigurationPage: React.FC = () => {
           <p className="text-gray-600">Transform your BRD into structured specifications and code</p>
         </div>
 
-        {/* Progress Stepper */}
-        <div className="mb-8 bg-white rounded-lg p-6 shadow-sm">
-          <ProgressStepper currentStep={1} steps={getSteps(artefacts)} />
-        </div>
-
         <Card>
           <CardHeader>
-            <CardTitle>Configuration</CardTitle>
+            <CardTitle>Upload BRD Document</CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
             {/* File Upload */}
@@ -134,32 +128,19 @@ export const ConfigurationPage: React.FC = () => {
               />
             </div>
 
-            {/* Artefacts Selection */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-3">
-                Artefacts to Generate
-              </label>
-              <div className="space-y-2">
-                {Object.entries({
-                  epics_and_stories: 'EPICs & User Stories',
-                  functional_tests: 'Functional Tests',
-                  gherkin_tests: 'Gherkin Tests (BDD)',
-                  data_model: 'Data Model & Diagrams',
-                  code_skeleton: 'Code Skeleton (ASP.NET)',
-                }).map(([key, label]) => (
-                  <label key={key} className="flex items-center space-x-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary"
-                      checked={artefacts[key as keyof ArtefactsConfig]}
-                      onChange={(e) =>
-                        setArtefacts({ ...artefacts, [key]: e.target.checked })
-                      }
-                    />
-                    <span className="text-sm text-gray-700">{label}</span>
-                  </label>
-                ))}
-              </div>
+            {/* Pipeline Information */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <h3 className="text-sm font-semibold text-blue-900 mb-2">Generation Pipeline</h3>
+              <p className="text-sm text-blue-800 mb-3">
+                The system will generate all artifacts through a staged pipeline:
+              </p>
+              <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
+                <li>EPICs & User Stories</li>
+                <li>Functional Tests</li>
+                <li>Gherkin BDD Scenarios</li>
+                <li>Data Model & Diagrams</li>
+                <li>Java Selenium + Cucumber Code Skeleton</li>
+              </ul>
             </div>
 
             {/* Error Display */}

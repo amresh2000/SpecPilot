@@ -53,12 +53,17 @@ export const EditableEpic: React.FC<EditableEpicProps> = ({ epic, jobId, onUpdat
 
     setIsDeleting(true);
     try {
-      await api.deleteEpic(jobId, epic.id);
-      toast.success('Epic and associated stories deleted successfully');
-      onUpdate(); // Refresh data
-    } catch (error) {
-      toast.error('Failed to delete epic');
-    } finally {
+      const result = await api.deleteEpic(jobId, epic.id);
+      if (result.success) {
+        toast.success(`Epic and ${result.deleted_stories_count} associated stories deleted successfully`);
+        onUpdate(); // Refresh data
+      } else {
+        toast.error('Failed to delete epic');
+        setIsDeleting(false);
+      }
+    } catch (error: any) {
+      console.error('Delete epic error:', error);
+      toast.error(error.response?.data?.detail || 'Failed to delete epic');
       setIsDeleting(false);
     }
   };

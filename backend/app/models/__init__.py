@@ -20,6 +20,9 @@ from .schemas import (
     CTQScore,
     ValidationReport,
     GapFix,
+    PipelineStage,
+    StageState,
+    GenerateMoreRequest,
 )
 
 __all__ = [
@@ -44,4 +47,7 @@ __all__ = [
     "CTQScore",
     "ValidationReport",
     "GapFix",
+    "PipelineStage",
+    "StageState",
+    "GenerateMoreRequest",
 ]

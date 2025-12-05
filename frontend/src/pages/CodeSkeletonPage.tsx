@@ -1,12 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { ProgressStepper } from '@/components/ui/ProgressStepper';
+import { StageProgressIndicator } from '@/components/StageProgressIndicator';
 import { api } from '@/lib/api';
-import { getSteps } from '@/lib/steps';
 import type { StatusResponse, CodeTreeNode } from '@/types';
-import { Loader2, ChevronRight, ChevronDown, File, Folder, Download, ArrowLeft, Home } from 'lucide-react';
+import { Loader2, ChevronRight, ChevronDown, File, Folder, Download, ArrowLeft, ArrowRight } from 'lucide-react';
 
 export const CodeSkeletonPage: React.FC = () => {
   const { jobId } = useParams<{ jobId: string }>();
@@ -118,26 +117,44 @@ export const CodeSkeletonPage: React.FC = () => {
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-8">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="mb-8">
+        <div className="mb-6">
           <h1 className="text-4xl font-bold text-gray-900 mb-2">Code Skeleton</h1>
-          <p className="text-gray-600">{status.results.project_name} - ASP.NET Core API</p>
+          <p className="text-gray-600">
+            Generated Java Selenium + Cucumber test automation framework
+          </p>
         </div>
 
-        {/* Progress Stepper */}
-        <div className="mb-8 bg-white rounded-lg p-6 shadow-sm">
-          <ProgressStepper currentStep={4} steps={getSteps(status.artefacts)} />
-        </div>
+        {/* Stage Progress */}
+        <StageProgressIndicator
+          currentStage={status.current_stage || 'code_generation'}
+          stageHistory={status.stage_history}
+        />
 
-        {/* Navigation */}
-        <div className="mb-6 flex gap-3">
-          <Button variant="outline" size="sm" onClick={() => navigate(`/results/${jobId}`)}>
+        {/* Action Buttons */}
+        <div className="flex gap-4 justify-between mb-6">
+          <Button
+            variant="outline"
+            onClick={() => navigate(`/gherkin-tests/${jobId}`)}
+          >
             <ArrowLeft className="w-4 h-4 mr-2" />
-            Back to Results
+            Back to Gherkin Tests
           </Button>
-          <Button variant="outline" size="sm" onClick={() => navigate('/')}>
-            <Home className="w-4 h-4 mr-2" />
-            New Generation
-          </Button>
+          <div className="flex gap-4">
+            <Button
+              variant="outline"
+              onClick={() => window.open(api.getDownloadUrl(jobId!), '_blank')}
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Download ZIP
+            </Button>
+            <Button
+              variant="default"
+              onClick={() => navigate(`/summary/${jobId}`)}
+            >
+              View Summary
+              <ArrowRight className="w-4 h-4 ml-2" />
+            </Button>
+          </div>
         </div>
 
         {/* Main Content Area */}
@@ -149,17 +166,6 @@ export const CodeSkeletonPage: React.FC = () => {
             <p className="text-sm text-gray-600">{status.results.project_name}</p>
           </div>
           <div className="p-4">{renderTree(status.results.code_tree)}</div>
-          <div className="p-4 border-t border-gray-200">
-            <Button
-              size="sm"
-              variant="outline"
-              className="w-full"
-              onClick={() => window.open(api.getDownloadUrl(jobId!), '_blank')}
-            >
-              <Download className="w-4 h-4 mr-2" />
-              Download ZIP
-            </Button>
-          </div>
         </div>
 
         {/* Right: File Preview */}

@@ -11,7 +11,7 @@ class Config:
     AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
     AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
     AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
-    AWS_BEDROCK_MODEL_ID = os.getenv("AWS_BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20241022-v2:0")
+    AWS_BEDROCK_MODEL_ID = os.getenv("AWS_BEDROCK_MODEL_ID", "us.anthropic.claude-3-5-sonnet-20241022-v2:0")
     
     # Proxy Configuration (auto-applied by boto3 and requests)
     HTTP_PROXY = os.getenv("HTTP_PROXY")

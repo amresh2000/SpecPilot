@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
-from app.models import GenerateRequest, GenerateResponse, StatusResponse, ArtefactsConfig, StepStatus, JobStatus, FunctionalTest, ValidationReport, GapFix, CTQScore
+from app.models import GenerateRequest, GenerateResponse, StatusResponse, ArtefactsConfig, StepStatus, JobStatus, FunctionalTest, ValidationReport, GapFix, CTQScore, PipelineStage, GenerateMoreRequest
 from app.services.job_manager import job_manager
 from app.services.brd_parser import BRDParser
 from app.services.generation_pipeline import GenerationPipeline
@@ -308,6 +308,9 @@ async def validate_brd(
         job = job_manager.get_job(job_id)
         job.uploaded_filename = file.filename
 
+        # Initialize staged pipeline at VALIDATION stage
+        job.advance_stage(PipelineStage.VALIDATION)
+
         # Save file
         job_dir = GENERATED_DIR / job_id
         job_dir.mkdir(exist_ok=True)
@@ -399,61 +402,6 @@ async def update_gap_fix(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-@router.post("/proceed-to-generation/{job_id}")
-async def proceed_to_generation(
-    job_id: str,
-    background_tasks: BackgroundTasks
-):
-    """After validation review, start the actual generation pipeline"""
-    try:
-        job = job_manager.get_job(job_id)
-        if not job:
-            raise HTTPException(status_code=404, detail="Job not found")
-
-        if not job.brd_data:
-            raise HTTPException(status_code=400, detail="BRD not parsed yet")
-
-        # Initialize generation steps
-        if job.artefacts.epics_and_stories:
-            job.add_step("Generating project name")
-            job.add_step("Generating EPICs & User Stories")
-        if job.artefacts.data_model:
-            job.add_step("Generating Data Model")
-        if job.artefacts.functional_tests:
-            job.add_step("Generating Functional Tests")
-        if job.artefacts.gherkin_tests:
-            job.add_step("Generating Gherkin Tests")
-        if job.artefacts.code_skeleton:
-            job.add_step("Generating Code Skeleton")
-
-        # Find the uploaded file
-        job_dir = GENERATED_DIR / job_id
-        uploaded_files = list(job_dir.glob("brd.*"))
-        if not uploaded_files:
-            raise HTTPException(status_code=400, detail="BRD file not found")
-
-        uploaded_file_path = str(uploaded_files[0])
-
-        # Run generation pipeline in background (BRD already parsed and saved)
-        async def run_generation():
-            try:
-                pipeline = GenerationPipeline(job_id, uploaded_file_path)
-                await pipeline.run()
-            except Exception as e:
-                job.mark_failed(str(e))
-
-        background_tasks.add_task(run_generation)
-
-        return {
-            "job_id": job_id,
-            "status": "generation_started"
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 @router.put("/update-epic/{job_id}/{epic_id}")
 async def update_epic(
@@ -810,84 +758,6 @@ async def regenerate_story_entities(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/cascade-analysis/{job_id}/{story_id}")
-async def analyze_cascade_impact(
-    job_id: str,
-    story_id: str
-):
-    """Analyze the impact of regenerating artifacts for a story"""
-    try:
-        job = job_manager.get_job(job_id)
-        if not job:
-            raise HTTPException(status_code=404, detail="Job not found")
-
-        # Find the story
-        story = None
-        for s in job.results.user_stories:
-            if s.id == story_id:
-                story = s
-                break
-
-        if not story:
-            raise HTTPException(status_code=404, detail="Story not found")
-
-        from app.models import DependencyImpact
-
-        # Count affected artifacts
-        affected_functional_tests = len([
-            t for t in job.results.functional_tests
-            if t.story_id == story_id
-        ])
-
-        affected_gherkin_tests = len([
-            t for t in job.results.gherkin_tests
-            if t.story_id == story_id
-        ])
-
-        total_affected_tests = affected_functional_tests + affected_gherkin_tests
-
-        # Count affected entities (entities that mention this story)
-        affected_entities = len([
-            e for e in job.results.entities
-            if e.source_story_ids and story_id in e.source_story_ids
-        ])
-
-        # Estimate time (rough heuristic: 10 seconds per test, 15 seconds per entity)
-        estimated_time = (total_affected_tests * 10) + (affected_entities * 15)
-
-        # Determine risk level
-        risk_level = "low"
-        if total_affected_tests > 5 or affected_entities > 3:
-            risk_level = "medium"
-        if total_affected_tests > 10 or affected_entities > 5:
-            risk_level = "high"
-
-        impact = DependencyImpact(
-            affected_tests=total_affected_tests,
-            affected_entities=affected_entities,
-            affected_code=0,  # Future: analyze code skeleton impact
-            estimated_time_seconds=estimated_time,
-            risk_level=risk_level
-        )
-
-        return {
-            "success": True,
-            "story_id": story_id,
-            "story_title": story.title,
-            "impact": impact.dict(),
-            "details": {
-                "functional_tests": affected_functional_tests,
-                "gherkin_tests": affected_gherkin_tests,
-                "entities": affected_entities
-            }
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @router.delete("/delete-epic/{job_id}/{epic_id}")
 async def delete_epic(
     job_id: str,
@@ -982,6 +852,102 @@ async def delete_story(
             "deleted_functional_tests": functional_tests_deleted,
             "deleted_gherkin_tests": gherkin_tests_deleted,
             "message": f"Story deleted with {functional_tests_deleted} functional and {gherkin_tests_deleted} Gherkin tests"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/update-functional-test/{job_id}/{test_id}")
+async def update_functional_test(
+    job_id: str,
+    test_id: str,
+    title: str = Form(...),
+    objective: str = Form(...),
+    preconditions: str = Form(...),  # JSON string
+    test_steps: str = Form(...),  # JSON string
+    expected_results: str = Form(...)  # JSON string
+):
+    """Update a functional test"""
+    try:
+        job = job_manager.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        # Parse JSON arrays
+        import json
+        preconditions_list = json.loads(preconditions)
+        test_steps_list = json.loads(test_steps)
+        expected_results_list = json.loads(expected_results)
+
+        # Find and update functional test
+        test_found = False
+        for test in job.results.functional_tests:
+            if test.id == test_id:
+                test.title = title
+                test.objective = objective
+                test.preconditions = preconditions_list
+                test.test_steps = test_steps_list
+                test.expected_results = expected_results_list
+                test_found = True
+                break
+
+        if not test_found:
+            raise HTTPException(status_code=404, detail="Functional test not found")
+
+        return {
+            "success": True,
+            "message": "Functional test updated successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/update-gherkin-test/{job_id}/{test_id}")
+async def update_gherkin_test(
+    job_id: str,
+    test_id: str,
+    feature_name: str = Form(...),
+    scenario_name: str = Form(...),
+    given: str = Form(...),  # JSON string
+    when: str = Form(...),  # JSON string
+    then: str = Form(...)  # JSON string
+):
+    """Update a Gherkin test"""
+    try:
+        job = job_manager.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        # Parse JSON arrays
+        import json
+        given_list = json.loads(given)
+        when_list = json.loads(when)
+        then_list = json.loads(then)
+
+        # Find and update gherkin test
+        test_found = False
+        for test in job.results.gherkin_tests:
+            if test.id == test_id:
+                test.feature_name = feature_name
+                test.scenario_name = scenario_name
+                test.given = given_list
+                test.when = when_list
+                test.then = then_list
+                test_found = True
+                break
+
+        if not test_found:
+            raise HTTPException(status_code=404, detail="Gherkin test not found")
+
+        return {
+            "success": True,
+            "message": "Gherkin test updated successfully"
         }
 
     except HTTPException:

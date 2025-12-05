@@ -1,6 +1,28 @@
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed';
 export type StepStatus = 'pending' | 'running' | 'completed' | 'failed';
 
+export type PipelineStage =
+  | 'validation'
+  | 'epics'
+  | 'functional_tests'
+  | 'gherkin_tests'
+  | 'data_model'
+  | 'code_generation'
+  | 'completed';
+
+export interface StageState {
+  stage: PipelineStage;
+  status: StepStatus;
+  completed_at?: string;
+  user_approved: boolean;
+}
+
+export interface GenerateMoreRequest {
+  stage: PipelineStage;
+  instructions: string;
+  context_ids?: string[];
+}
+
 export interface ArtefactsConfig {
   epics_and_stories: boolean;
   functional_tests: boolean;
@@ -101,6 +123,8 @@ export interface GenerationResults {
 
 export interface StatusResponse {
   status: JobStatus;
+  current_stage?: PipelineStage;
+  stage_history: StageState[];
   error?: string;
   steps: Step[];
   results: GenerationResults;

@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { GenerateRequest, StatusResponse } from '@/types';
+import type { GenerateRequest, StatusResponse, GenerateMoreRequest, PipelineStage } from '@/types';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 
@@ -78,11 +78,6 @@ export const api = {
       },
     });
 
-    return response.data;
-  },
-
-  async proceedToGeneration(jobId: string): Promise<any> {
-    const response = await axios.post(`${API_BASE_URL}/proceed-to-generation/${jobId}`);
     return response.data;
   },
 
@@ -197,6 +192,80 @@ export const api = {
           'Content-Type': 'multipart/form-data',
         },
       }
+    );
+    return response.data;
+  },
+
+  async updateFunctionalTest(
+    jobId: string,
+    testId: string,
+    title: string,
+    objective: string,
+    preconditions: string[],
+    testSteps: string[],
+    expectedResults: string[]
+  ): Promise<any> {
+    const formData = new FormData();
+    formData.append('title', title);
+    formData.append('objective', objective);
+    formData.append('preconditions', JSON.stringify(preconditions));
+    formData.append('test_steps', JSON.stringify(testSteps));
+    formData.append('expected_results', JSON.stringify(expectedResults));
+
+    const response = await axios.put(
+      `${API_BASE_URL}/update-functional-test/${jobId}/${testId}`,
+      formData,
+      {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      }
+    );
+
+    return response.data;
+  },
+
+  async updateGherkinTest(
+    jobId: string,
+    testId: string,
+    featureName: string,
+    scenarioName: string,
+    given: string[],
+    when: string[],
+    then: string[]
+  ): Promise<any> {
+    const formData = new FormData();
+    formData.append('feature_name', featureName);
+    formData.append('scenario_name', scenarioName);
+    formData.append('given', JSON.stringify(given));
+    formData.append('when', JSON.stringify(when));
+    formData.append('then', JSON.stringify(then));
+
+    const response = await axios.put(
+      `${API_BASE_URL}/update-gherkin-test/${jobId}/${testId}`,
+      formData,
+      {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      }
+    );
+
+    return response.data;
+  },
+
+  // Staged Pipeline Endpoints
+  async proceedToStage(jobId: string, nextStage: PipelineStage): Promise<any> {
+    const response = await axios.post(
+      `${API_BASE_URL}/proceed-to-stage/${jobId}?next_stage=${nextStage}`
+    );
+    return response.data;
+  },
+
+  async generateMore(jobId: string, request: GenerateMoreRequest): Promise<any> {
+    const response = await axios.post(
+      `${API_BASE_URL}/generate-more/${jobId}`,
+      request
     );
     return response.data;
   },

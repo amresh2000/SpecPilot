@@ -108,9 +108,11 @@ export const ValidationPage: React.FC = () => {
     setIsProceeding(true);
 
     try {
-      await api.proceedToGeneration(jobId!);
-      toast.success('Generation started!');
-      navigate(`/progress/${jobId}`);
+      // Proceed to the EPICS stage in the new staged workflow
+      await api.proceedToStage(jobId!, 'epics');
+      toast.success('Starting epics generation...');
+      // Navigate to the epics refinement page
+      navigate(`/epics/${jobId}`);
     } catch (error) {
       toast.error('Failed to start generation');
       setIsProceeding(false);

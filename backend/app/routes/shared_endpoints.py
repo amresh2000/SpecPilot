@@ -5,96 +5,24 @@ import tempfile
 import asyncio
 from datetime import datetime
 from pathlib import Path
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
-from app.models import GenerateRequest, GenerateResponse, StatusResponse, ArtefactsConfig, StepStatus, JobStatus, FunctionalTest, ValidationReport, GapFix, CTQScore, PipelineStage, GenerateMoreRequest
+from app.models import (
+    GenerateRequest, StatusResponse, ArtefactsConfig, StepStatus, JobStatus,
+    FunctionalTest, ValidationReport, GapFix, CTQScore, PipelineStage,
+    UpdateEpicRequest, UpdateStoryRequest, UpdateAcceptanceCriteriaRequest,
+    UpdateFunctionalTestRequest, UpdateGherkinTestRequest, UpdateGapFixRequest, DeleteTestRequest
+)
 from app.services.job_manager import job_manager
 from app.services.brd_parser import BRDParser
-from app.services.generation_pipeline import GenerationPipeline
 from app.services.llm_client import BedrockLLMClient
+from app.utils import log_info, log_error, log_warning
 
 router = APIRouter()
 
 # Ensure generated directory exists
 GENERATED_DIR = Path("generated")
 GENERATED_DIR.mkdir(exist_ok=True)
-
-
-async def run_generation_pipeline(job_id: str, file_content: bytes, file_extension: str):
-    """Background task to save file and run the generation pipeline"""
-    try:
-        # Save the uploaded file
-        job_dir = GENERATED_DIR / job_id
-        job_dir.mkdir(exist_ok=True)
-        uploaded_file_path = job_dir / f"brd{file_extension}"
-
-        with open(uploaded_file_path, 'wb') as f:
-            f.write(file_content)
-
-        # Run the generation pipeline
-        pipeline = GenerationPipeline(job_id, str(uploaded_file_path))
-        await pipeline.run()
-    except Exception as e:
-        # Mark job as failed if pipeline crashes
-        job = job_manager.get_job(job_id)
-        if job:
-            job.mark_failed(str(e))
-
-
-@router.post("/generate", response_model=GenerateResponse)
-async def generate(
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    payload: str = Form(...)
-):
-    """Start the generation pipeline"""
-    try:
-        # Parse payload
-        request_data = json.loads(payload)
-        request = GenerateRequest(**request_data)
-
-        # Validate file type
-        if not (file.filename.endswith('.docx') or file.filename.endswith('.txt')):
-            raise HTTPException(status_code=400, detail="Only .docx and .txt files are supported")
-
-        # Check file size (15MB limit)
-        content = await file.read()
-        if len(content) > 15 * 1024 * 1024:
-            raise HTTPException(status_code=400, detail="File size exceeds 15MB limit")
-
-        # Create job
-        job_id = job_manager.create_job(request.instructions, request.artefacts)
-        job = job_manager.get_job(job_id)
-
-        # Store filename
-        job.uploaded_filename = file.filename
-
-        # Initialize steps
-        job.add_step("Parsing documents")
-        if request.artefacts.epics_and_stories:
-            job.add_step("Generating project name")
-            job.add_step("Generating EPICs & User Stories")
-        if request.artefacts.data_model:
-            job.add_step("Generating Data Model")
-        if request.artefacts.functional_tests:
-            job.add_step("Generating Functional Tests")
-        if request.artefacts.gherkin_tests:
-            job.add_step("Generating Gherkin Tests")
-        if request.artefacts.code_skeleton:
-            job.add_step("Generating Code Skeleton")
-
-        # Determine file extension
-        file_extension = '.docx' if file.filename.endswith('.docx') else '.txt'
-
-        # Start generation pipeline in background (with file saving)
-        background_tasks.add_task(run_generation_pipeline, job_id, content, file_extension)
-
-        return GenerateResponse(job_id=job_id)
-
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid payload format")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/status/{job_id}", response_model=StatusResponse)
@@ -364,52 +292,49 @@ async def validate_brd(
 
 
 @router.post("/update-gap-fix/{job_id}")
-async def update_gap_fix(
-    job_id: str,
-    gap_id: str = Form(...),
-    action: str = Form(...),
-    final_text: str = Form(None)
-):
+async def update_gap_fix(job_id: str, request: UpdateGapFixRequest):
     """User accepts/edits/rejects a gap fix"""
     try:
+        log_info("Updating gap fix", job_id=job_id, gap_id=request.gap_id, action=request.action)
+
         job = job_manager.get_job(job_id)
         if not job:
+            log_warning("Job not found", job_id=job_id)
             raise HTTPException(status_code=404, detail="Job not found")
 
         # Find and update the gap fix
         gap_fix = None
         for gf in job.results.gap_fixes:
-            if gf.gap_id == gap_id:
+            if gf.gap_id == request.gap_id:
                 gap_fix = gf
                 break
 
         if not gap_fix:
+            log_warning("Gap fix not found", job_id=job_id, gap_id=request.gap_id)
             raise HTTPException(status_code=404, detail="Gap fix not found")
 
         # Update gap fix
-        gap_fix.user_action = action
-        if final_text:
-            gap_fix.final_text = final_text
+        gap_fix.user_action = request.action
+        if request.final_text:
+            gap_fix.final_text = request.final_text
+
+        log_info("Gap fix updated", job_id=job_id, gap_id=request.gap_id)
 
         return {
-            "gap_id": gap_id,
-            "action": action,
+            "gap_id": request.gap_id,
+            "action": request.action,
             "updated": True
         }
 
     except HTTPException:
         raise
     except Exception as e:
+        log_error("Error updating gap fix", error=e, job_id=job_id)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.put("/update-epic/{job_id}/{epic_id}")
-async def update_epic(
-    job_id: str,
-    epic_id: str,
-    name: str = Form(...),
-    description: str = Form(...)
-):
+async def update_epic(job_id: str, epic_id: str, request: UpdateEpicRequest):
     """Update an epic's name and description"""
     try:
         job = job_manager.get_job(job_id)
@@ -420,8 +345,8 @@ async def update_epic(
         epic_found = False
         for epic in job.results.epics:
             if epic.id == epic_id:
-                epic.name = name
-                epic.description = description
+                epic.name = request.name
+                epic.description = request.description
                 epic.edited_at = datetime.now()
                 epic_found = True
                 break
@@ -429,30 +354,26 @@ async def update_epic(
         if not epic_found:
             raise HTTPException(status_code=404, detail="Epic not found")
 
+        log_info("Epic updated", job_id=job_id, epic_id=epic_id)
+
         return {
             "success": True,
             "epic_id": epic_id,
             "updated": {
-                "name": name,
-                "description": description
+                "name": request.name,
+                "description": request.description
             }
         }
 
     except HTTPException:
         raise
     except Exception as e:
+        log_error("Error updating epic", error=e, job_id=job_id, epic_id=epic_id)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.put("/update-story/{job_id}/{story_id}")
-async def update_story(
-    job_id: str,
-    story_id: str,
-    title: str = Form(...),
-    role: str = Form(...),
-    goal: str = Form(...),
-    benefit: str = Form(...)
-):
+async def update_story(job_id: str, story_id: str, request: UpdateStoryRequest):
     """Update a user story's core fields"""
     try:
         job = job_manager.get_job(job_id)
@@ -463,10 +384,10 @@ async def update_story(
         story_found = False
         for story in job.results.user_stories:
             if story.id == story_id:
-                story.title = title
-                story.role = role
-                story.goal = goal
-                story.benefit = benefit
+                story.title = request.title
+                story.role = request.role
+                story.goal = request.goal
+                story.benefit = request.benefit
                 story.edited_at = datetime.now()
                 story.regeneration_needed = True
                 story_found = True
@@ -475,37 +396,33 @@ async def update_story(
         if not story_found:
             raise HTTPException(status_code=404, detail="Story not found")
 
+        log_info("Story updated", job_id=job_id, story_id=story_id)
+
         return {
             "success": True,
             "story_id": story_id,
             "updated": {
-                "title": title,
-                "role": role,
-                "goal": goal,
-                "benefit": benefit
+                "title": request.title,
+                "role": request.role,
+                "goal": request.goal,
+                "benefit": request.benefit
             }
         }
 
     except HTTPException:
         raise
     except Exception as e:
+        log_error("Error updating story", error=e, job_id=job_id, story_id=story_id)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.put("/update-acceptance-criteria/{job_id}/{story_id}")
-async def update_acceptance_criteria(
-    job_id: str,
-    story_id: str,
-    criteria: str = Form(...)  # JSON string array
-):
+async def update_acceptance_criteria(job_id: str, story_id: str, request: UpdateAcceptanceCriteriaRequest):
     """Update acceptance criteria for a story"""
     try:
         job = job_manager.get_job(job_id)
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
-
-        # Parse criteria JSON
-        criteria_list = json.loads(criteria)
 
         # Find and update story
         story_found = False
@@ -519,7 +436,7 @@ async def update_acceptance_criteria(
                         text=text,
                         source_chunks=[]
                     )
-                    for idx, text in enumerate(criteria_list)
+                    for idx, text in enumerate(request.criteria)
                 ]
                 story.edited_at = datetime.now()
                 story.regeneration_needed = True
@@ -529,232 +446,18 @@ async def update_acceptance_criteria(
         if not story_found:
             raise HTTPException(status_code=404, detail="Story not found")
 
-        return {
-            "success": True,
-            "story_id": story_id,
-            "criteria_count": len(criteria_list)
-        }
-
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid criteria JSON")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/regenerate-story-tests/{job_id}/{story_id}")
-async def regenerate_story_tests(
-    job_id: str,
-    story_id: str,
-    background_tasks: BackgroundTasks
-):
-    """Regenerate functional and Gherkin tests for a specific user story"""
-    try:
-        job = job_manager.get_job(job_id)
-        if not job:
-            raise HTTPException(status_code=404, detail="Job not found")
-
-        # Find the story
-        story = None
-        for s in job.results.user_stories:
-            if s.id == story_id:
-                story = s
-                break
-
-        if not story:
-            raise HTTPException(status_code=404, detail="Story not found")
-
-        # Background task to regenerate tests
-        async def _regenerate_tests():
-            try:
-                from app.services.llm_client import BedrockLLMClient
-                from app.models import FunctionalTest, GherkinScenario
-
-                llm_client = BedrockLLMClient()
-
-                # Collect chunk IDs from the story
-                chunk_ids = set()
-                if story.source_chunks:
-                    chunk_ids.update(story.source_chunks)
-                for ac in story.acceptance_criteria:
-                    if ac.source_chunks:
-                        chunk_ids.update(ac.source_chunks)
-
-                # Retrieve chunk data from BRD
-                brd_chunks = []
-                if job.brd_data and chunk_ids:
-                    all_chunks = job.brd_data.get('chunks', [])
-                    brd_chunks = [c for c in all_chunks if c['id'] in chunk_ids]
-
-                # Get applied gap fixes
-                gap_fixes = []
-                if job.results.gap_fixes:
-                    for gf in job.results.gap_fixes:
-                        if gf.user_action == "accept":
-                            gap_fixes.append({
-                                "type": gf.gap_type,
-                                "issue": gf.issue,
-                                "correction": gf.suggestion
-                            })
-                        elif gf.user_action == "edit" and gf.final_text:
-                            gap_fixes.append({
-                                "type": gf.gap_type,
-                                "issue": gf.issue,
-                                "correction": gf.final_text
-                            })
-
-                # Regenerate functional tests for this story
-                functional_result = llm_client.generate_functional_tests(
-                    [story],
-                    job.instructions,
-                    brd_chunks if brd_chunks else None,
-                    gap_fixes
-                )
-
-                # Remove old tests for this story
-                job.results.functional_tests = [
-                    t for t in job.results.functional_tests
-                    if t.story_id != story_id
-                ]
-
-                # Add new tests with regeneration timestamp
-                for test_data in functional_result.get('functional_tests', []):
-                    test = FunctionalTest(**test_data)
-                    test.regenerated_at = datetime.now()
-                    job.results.functional_tests.append(test)
-
-                # Regenerate Gherkin tests for this story
-                gherkin_result = llm_client.generate_gherkin_tests([story], gap_fixes)
-
-                # Remove old Gherkin tests for this story
-                job.results.gherkin_tests = [
-                    t for t in job.results.gherkin_tests
-                    if t.story_id != story_id
-                ]
-
-                # Add new Gherkin tests with regeneration timestamp
-                for scenario_data in gherkin_result.get('gherkin_tests', []):
-                    scenario = GherkinScenario(**scenario_data)
-                    scenario.regenerated_at = datetime.now()
-                    job.results.gherkin_tests.append(scenario)
-
-                # Clear regeneration flag
-                story.regeneration_needed = False
-
-            except Exception as e:
-                print(f"Error regenerating tests for story {story_id}: {str(e)}")
-
-        # Add to background tasks
-        background_tasks.add_task(_regenerate_tests)
+        log_info("Acceptance criteria updated", job_id=job_id, story_id=story_id, count=len(request.criteria))
 
         return {
             "success": True,
             "story_id": story_id,
-            "message": "Test regeneration started in background"
+            "criteria_count": len(request.criteria)
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/regenerate-story-entities/{job_id}/{story_id}")
-async def regenerate_story_entities(
-    job_id: str,
-    story_id: str,
-    background_tasks: BackgroundTasks
-):
-    """Regenerate entities (data model) for affected stories"""
-    try:
-        job = job_manager.get_job(job_id)
-        if not job:
-            raise HTTPException(status_code=404, detail="Job not found")
-
-        # Find the story
-        story = None
-        for s in job.results.user_stories:
-            if s.id == story_id:
-                story = s
-                break
-
-        if not story:
-            raise HTTPException(status_code=404, detail="Story not found")
-
-        # Background task to regenerate entities
-        async def _regenerate_entities():
-            try:
-                from app.services.llm_client import BedrockLLMClient
-                from app.models import Entity, EntityField
-
-                llm_client = BedrockLLMClient()
-
-                # Get applied gap fixes
-                gap_fixes = []
-                if job.results.gap_fixes:
-                    for gf in job.results.gap_fixes:
-                        if gf.user_action == "accept":
-                            gap_fixes.append({
-                                "type": gf.gap_type,
-                                "issue": gf.issue,
-                                "correction": gf.suggestion
-                            })
-                        elif gf.user_action == "edit" and gf.final_text:
-                            gap_fixes.append({
-                                "type": gf.gap_type,
-                                "issue": gf.issue,
-                                "correction": gf.final_text
-                            })
-
-                # Get all stories that need entity regeneration
-                stories_for_regen = [s for s in job.results.user_stories if s.regeneration_needed or s.id == story_id]
-
-                # Regenerate data model
-                result = llm_client.generate_data_model(
-                    job.brd_data,
-                    stories_for_regen,
-                    gap_fixes
-                )
-
-                # Remove old entities that were derived from affected stories
-                affected_story_ids = [s.id for s in stories_for_regen]
-                job.results.entities = [
-                    e for e in job.results.entities
-                    if not (e.source_story_ids and any(sid in affected_story_ids for sid in e.source_story_ids))
-                ]
-
-                # Add new entities with regeneration timestamp
-                for entity_data in result.get('entities', []):
-                    fields = []
-                    for field_data in entity_data.get('fields', []):
-                        field = EntityField(**field_data)
-                        fields.append(field)
-
-                    entity_data['fields'] = fields
-                    entity = Entity(**entity_data)
-                    entity.regenerated_at = datetime.now()
-                    entity.source_story_ids = affected_story_ids
-                    job.results.entities.append(entity)
-
-                # Update Mermaid diagram
-                job.results.mermaid = result.get('mermaid', '')
-
-            except Exception as e:
-                print(f"Error regenerating entities for story {story_id}: {str(e)}")
-
-        # Add to background tasks
-        background_tasks.add_task(_regenerate_entities)
-
-        return {
-            "success": True,
-            "story_id": story_id,
-            "message": "Entity regeneration started in background"
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
+        log_error("Error updating acceptance criteria", error=e, job_id=job_id, story_id=story_id)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -861,41 +564,29 @@ async def delete_story(
 
 
 @router.put("/update-functional-test/{job_id}/{test_id}")
-async def update_functional_test(
-    job_id: str,
-    test_id: str,
-    title: str = Form(...),
-    objective: str = Form(...),
-    preconditions: str = Form(...),  # JSON string
-    test_steps: str = Form(...),  # JSON string
-    expected_results: str = Form(...)  # JSON string
-):
+async def update_functional_test(job_id: str, test_id: str, request: UpdateFunctionalTestRequest):
     """Update a functional test"""
     try:
         job = job_manager.get_job(job_id)
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
 
-        # Parse JSON arrays
-        import json
-        preconditions_list = json.loads(preconditions)
-        test_steps_list = json.loads(test_steps)
-        expected_results_list = json.loads(expected_results)
-
         # Find and update functional test
         test_found = False
         for test in job.results.functional_tests:
             if test.id == test_id:
-                test.title = title
-                test.objective = objective
-                test.preconditions = preconditions_list
-                test.test_steps = test_steps_list
-                test.expected_results = expected_results_list
+                test.title = request.title
+                test.objective = request.objective
+                test.preconditions = request.preconditions
+                test.test_steps = request.test_steps
+                test.expected_results = request.expected_results
                 test_found = True
                 break
 
         if not test_found:
             raise HTTPException(status_code=404, detail="Functional test not found")
+
+        log_info("Functional test updated", job_id=job_id, test_id=test_id)
 
         return {
             "success": True,
@@ -905,45 +596,34 @@ async def update_functional_test(
     except HTTPException:
         raise
     except Exception as e:
+        log_error("Error updating functional test", error=e, job_id=job_id, test_id=test_id)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.put("/update-gherkin-test/{job_id}/{test_id}")
-async def update_gherkin_test(
-    job_id: str,
-    test_id: str,
-    feature_name: str = Form(...),
-    scenario_name: str = Form(...),
-    given: str = Form(...),  # JSON string
-    when: str = Form(...),  # JSON string
-    then: str = Form(...)  # JSON string
-):
+async def update_gherkin_test(job_id: str, test_id: str, request: UpdateGherkinTestRequest):
     """Update a Gherkin test"""
     try:
         job = job_manager.get_job(job_id)
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
 
-        # Parse JSON arrays
-        import json
-        given_list = json.loads(given)
-        when_list = json.loads(when)
-        then_list = json.loads(then)
-
         # Find and update gherkin test
         test_found = False
         for test in job.results.gherkin_tests:
             if test.id == test_id:
-                test.feature_name = feature_name
-                test.scenario_name = scenario_name
-                test.given = given_list
-                test.when = when_list
-                test.then = then_list
+                test.feature_name = request.feature_name
+                test.scenario_name = request.scenario_name
+                test.given = request.given
+                test.when = request.when
+                test.then = request.then
                 test_found = True
                 break
 
         if not test_found:
             raise HTTPException(status_code=404, detail="Gherkin test not found")
+
+        log_info("Gherkin test updated", job_id=job_id, test_id=test_id)
 
         return {
             "success": True,
@@ -953,15 +633,12 @@ async def update_gherkin_test(
     except HTTPException:
         raise
     except Exception as e:
+        log_error("Error updating Gherkin test", error=e, job_id=job_id, test_id=test_id)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.delete("/delete-test/{job_id}/{test_id}")
-async def delete_test(
-    job_id: str,
-    test_id: str,
-    test_type: str = Form(...)  # "functional" or "gherkin"
-):
+async def delete_test(job_id: str, test_id: str, request: DeleteTestRequest):
     """Delete a functional or Gherkin test"""
     try:
         job = job_manager.get_job(job_id)
@@ -970,7 +647,7 @@ async def delete_test(
 
         test_found = False
 
-        if test_type == "functional":
+        if request.test_type == "functional":
             # Find and delete functional test
             for test in job.results.functional_tests:
                 if test.id == test_id:
@@ -983,7 +660,7 @@ async def delete_test(
                     if t.id != test_id
                 ]
 
-        elif test_type == "gherkin":
+        elif request.test_type == "gherkin":
             # Find and delete gherkin test
             for test in job.results.gherkin_tests:
                 if test.id == test_id:
@@ -1000,16 +677,19 @@ async def delete_test(
             raise HTTPException(status_code=400, detail="Invalid test_type. Must be 'functional' or 'gherkin'")
 
         if not test_found:
-            raise HTTPException(status_code=404, detail=f"{test_type.capitalize()} test not found")
+            raise HTTPException(status_code=404, detail=f"{request.test_type.capitalize()} test not found")
+
+        log_info("Test deleted", job_id=job_id, test_id=test_id, test_type=request.test_type)
 
         return {
             "success": True,
             "test_id": test_id,
-            "test_type": test_type,
-            "message": f"{test_type.capitalize()} test deleted successfully"
+            "test_type": request.test_type,
+            "message": f"{request.test_type.capitalize()} test deleted successfully"
         }
 
     except HTTPException:
         raise
     except Exception as e:
+        log_error("Error deleting test", error=e, job_id=job_id, test_id=test_id)
         raise HTTPException(status_code=500, detail=str(e))

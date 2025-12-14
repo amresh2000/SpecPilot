@@ -2,7 +2,7 @@
 
 ## System Overview
 
-SpecPilot is a two-tier web application that transforms Business Requirements Documents (BRDs) into technical artifacts using AWS Bedrock (Claude 3.5 Sonnet v2).
+SpecPilot is a two-tier web application with a staged pipeline architecture that transforms Business Requirements Documents (BRDs) into technical artifacts using AWS Bedrock (Claude 3.5 Sonnet v2). The system follows a user-approved progression through 7 stages, from quality validation to final code generation.
 
 ### Architecture Diagram
 
@@ -19,9 +19,11 @@ SpecPilot is a two-tier web application that transforms Business Requirements Do
 │                    Backend (FastAPI)                         │
 │  ┌───────────────────────────────────────────────────────┐  │
 │  │              API Layer (routes/)                      │  │
-│  │  - /validate-brd                                      │  │
-│  │  - /update-gap-fix                                    │  │
-│  │  - /proceed-to-generation                             │  │
+│  │  - /validate-brd (Stage 1)                            │  │
+│  │  - /update-gap-fix (Gap fix review)                   │  │
+│  │  - /proceed-to-stage/{job_id} (Stages 2-7)            │  │
+│  │  - /generate-more (Additional artifacts)              │  │
+│  │  - CRUD endpoints (edit/delete artifacts)             │  │
 │  │  - /status, /download                                 │  │
 │  └───────────────────────────────────────────────────────┘  │
 │                        │                                     │
@@ -56,16 +58,21 @@ SpecPilot is a two-tier web application that transforms Business Requirements Do
 - Lucide React (icons)
 - React Router (navigation)
 
-**Key Components**:
-- `HomePage.tsx`: BRD upload and configuration
-- `ValidationPage.tsx`: Quality validation review (HITL)
-- `ProgressPage.tsx`: Real-time generation progress
-- `ResultsPage.tsx`: Artifact visualization and download
+**Key Components** (8-stage workflow):
+- `ConfigurationPage.tsx`: BRD upload and instructions (Stage 1)
+- `ValidationPage.tsx`: Quality validation review with gap fixes (Stage 2)
+- `EpicsRefinementPage.tsx`: EPICs & User Stories editing (Stage 3)
+- `FunctionalTestsRefinementPage.tsx`: Functional test case editing (Stage 4)
+- `GherkinTestsRefinementPage.tsx`: Gherkin BDD scenario editing (Stage 5)
+- `DataModelPage.tsx`: Entity-relationship model visualization (Stage 6)
+- `CodeSkeletonPage.tsx`: Java Selenium + Cucumber code preview (Stage 7)
+- `SummaryPage.tsx`: Final download and completion (Stage 8)
 
 **State Management**:
 - Local component state with React hooks
-- Navigation state for page-to-page data flow
-- Toast notifications for user feedback
+- React Router for staged workflow navigation
+- URL parameters for job_id and stage tracking
+- Toast notifications for user feedback and error handling
 
 ---
 
@@ -83,16 +90,18 @@ SpecPilot is a two-tier web application that transforms Business Requirements Do
 backend/
 ├── app/
 │   ├── main.py                    # FastAPI application entry
-│   ├── models/
-│   │   └── schemas.py             # Pydantic data models
+│   ├── models.py                  # Pydantic data models
 │   ├── routes/
-│   │   └── generation.py          # API endpoints
-│   └── services/
-│       ├── brd_parser.py          # Document parsing logic
-│       ├── generation_pipeline.py # Orchestration pipeline
-│       ├── llm_client.py          # AWS Bedrock integration
-│       └── job_manager.py         # In-memory job state
-├── generated/                     # Output directory
+│   │   ├── validation_endpoints.py    # Validation API
+│   │   ├── staged_endpoints.py        # Staged pipeline API
+│   │   └── crud_endpoints.py          # Edit/delete operations
+│   ├── services/
+│   │   ├── brd_parser.py              # Document parsing logic
+│   │   ├── generation_pipeline.py     # Stage orchestration
+│   │   ├── llm_client.py              # AWS Bedrock integration
+│   │   └── job_manager.py             # In-memory job state
+│   └── utils.py                   # Logging and utility functions
+├── generated/                     # Output directory for artifacts
 └── venv/                          # Python virtual environment
 ```
 
@@ -162,32 +171,32 @@ Handles all AWS Bedrock API interactions with Claude 3.5 Sonnet v2.
 
 **LLM Calls**:
 1. `validate_brd_quality()`: 10 CTQ dimension validation
-2. `generate_gap_fixes()`: AI-suggested remediation
-3. `generate_epics_and_stories()`: Epic and user story generation
-4. `generate_functional_tests()`: Functional test case generation
-5. `generate_gherkin_tests()`: BDD Gherkin scenarios
+2. `generate_gap_fixes()`: AI-suggested remediation for gaps
+3. `generate_epics_and_stories()`: Epic and user story generation with acceptance criteria
+4. `generate_functional_tests()`: Functional test case generation from stories
+5. `generate_gherkin_tests()`: BDD Gherkin scenarios from functional tests
 6. `generate_data_model()`: Entity-relationship model + Mermaid diagram
-7. `generate_code_skeleton()`: ASP.NET Core code structure
+7. `generate_code_skeleton()`: Java Selenium + Cucumber test automation framework
 
 ---
 
 ### 3. GenerationPipeline (`generation_pipeline.py`)
 
-Orchestrates the multi-step generation workflow.
+Stage-by-stage generation orchestrator called by staged_endpoints.py.
 
-**Pipeline Steps**:
-1. Parse BRD document
-2. Generate project name
-3. Generate epics and user stories
-4. Generate data model (if enabled)
-5. Generate functional tests (if enabled)
-6. Generate Gherkin tests (if enabled)
-7. Generate code skeleton (if enabled)
+**Pipeline Methods** (called per stage):
+1. `_parse_brd()`: Parse BRD document into structured chunks
+2. `_generate_epics_and_stories()`: Generate project name, epics, and user stories
+3. `_generate_functional_tests()`: Generate functional test cases from stories
+4. `_generate_gherkin_tests()`: Generate Gherkin BDD scenarios from functional tests
+5. `_generate_data_model()`: Generate entities and Mermaid ER diagram
+6. `_generate_code_skeleton()`: Generate Java Selenium + Cucumber framework with POM
 
-**State Management**:
-- Updates job status after each step
-- Handles errors gracefully
-- Marks job as completed or failed
+**Stage History Tracking**:
+- Maintains stage history with completion timestamps
+- Skips regeneration if stage already completed
+- Supports progressive advancement through pipeline
+- Updates job status and step tracking
 
 ---
 
@@ -200,13 +209,19 @@ In-memory state manager for generation jobs.
 class Job:
     job_id: str
     status: JobStatus  # "pending", "in_progress", "completed", "failed"
+    current_stage: PipelineStage  # Tracks current stage
+    stage_history: List[StageHistoryEntry]  # Stage completion timestamps
     instructions: str
-    artefacts: ArtefactsConfig
     uploaded_filename: str
-    brd_data: dict
-    steps: List[Step]
-    results: GenerationResults
+    brd_data: dict  # Parsed BRD with chunks
+    steps: List[Step]  # Step-by-step progress tracking
+    results: GenerationResults  # All generated artifacts
     error: Optional[str]
+
+class StageHistoryEntry:
+    stage: PipelineStage
+    status: str  # "completed", "in_progress"
+    completed_at: Optional[datetime]
 ```
 
 **Limitations**:
@@ -218,35 +233,87 @@ class Job:
 
 ## Data Flow
 
-### Two-Step Workflow (with Validation)
+### Staged Pipeline Workflow (7 Stages with Human-in-the-Loop)
 
 ```
-1. User uploads BRD
+Stage 1: BRD Upload and Validation
+1. User uploads BRD (ConfigurationPage)
    ↓
 2. POST /api/validate-brd
    ↓
-3. BRDParser.parse() → Structured BRD data
+3. BRDParser.parse() → Structured BRD data with chunks
    ↓
-4. BedrockLLMClient.validate_brd_quality() → CTQ scores
+4. BedrockLLMClient.validate_brd_quality() → 10 CTQ scores
    ↓
 5. BedrockLLMClient.generate_gap_fixes() → AI-suggested fixes
    ↓
-6. Frontend displays ValidationPage
+6. Frontend displays ValidationPage with gap fixes
    ↓
-7. Human reviews and updates gap fixes
+7. Human reviews and updates gap fixes (accept/edit/reject)
    ↓
-8. POST /api/update-gap-fix (for each gap)
+8. POST /api/update-gap-fix (for each gap reviewed)
+
+Stage 2: EPICs & User Stories
+9. User clicks "Proceed to EPICs & User Stories"
    ↓
-9. POST /api/proceed-to-generation
+10. POST /api/proceed-to-stage/{job_id} with stage=EPICS
    ↓
-10. GenerationPipeline.run() → Background task
+11. GenerationPipeline._generate_epics_and_stories() → Background task
    ↓
-11. Multiple LLM calls for artifact generation
+12. GET /api/status (polling for completion)
    ↓
-12. GET /api/status (polling)
+13. Frontend displays EpicsRefinementPage
    ↓
-13. GET /api/download → ZIP file
+14. User can edit/delete epics and stories
+   ↓
+15. Optional: POST /api/generate-more (generate additional artifacts)
+
+Stage 3: Functional Tests
+16. User clicks "Proceed to Functional Tests"
+   ↓
+17. POST /api/proceed-to-stage/{job_id} with stage=FUNCTIONAL_TESTS
+   ↓
+18. GenerationPipeline._generate_functional_tests() → Background task
+   ↓
+19. Frontend displays FunctionalTestsRefinementPage
+   ↓
+20. User can edit/delete functional tests, generate more
+
+Stage 4: Gherkin Tests
+21. POST /api/proceed-to-stage/{job_id} with stage=GHERKIN_TESTS
+   ↓
+22. GenerationPipeline._generate_gherkin_tests() → Background task
+   ↓
+23. Frontend displays GherkinTestsRefinementPage
+
+Stage 5: Data Model
+24. POST /api/proceed-to-stage/{job_id} with stage=DATA_MODEL
+   ↓
+25. GenerationPipeline._generate_data_model() → Background task
+   ↓
+26. Frontend displays DataModelPage with Mermaid diagram
+
+Stage 6: Code Generation
+27. POST /api/proceed-to-stage/{job_id} with stage=CODE_GENERATION
+   ↓
+28. GenerationPipeline._generate_code_skeleton() → Background task
+   ↓
+29. Frontend displays CodeSkeletonPage with file tree
+
+Stage 7: Summary and Download
+30. User clicks "Proceed to Summary"
+   ↓
+31. Frontend displays SummaryPage
+   ↓
+32. GET /api/download/{job_id} → ZIP file with all artifacts
 ```
+
+**Key Features**:
+- User approval required before each stage progression
+- Edit/delete operations available at EPICs, Stories, Tests stages
+- Stage history prevents duplicate regeneration
+- Background tasks for all LLM operations
+- Real-time polling for progress updates
 
 ---
 

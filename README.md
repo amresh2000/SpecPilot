@@ -6,29 +6,32 @@ SpecPilot is an AI-powered tool that converts Business Requirements Documents (B
 
 ## 🚀 Features
 
-### Two-Step Workflow with Human-in-the-Loop
+### Staged Pipeline with Human-in-the-Loop
 
-1. **BRD Quality Validation**
+1. **BRD Quality Validation** (Stage 1)
 
    - Evaluates BRD across 10 Critical-to-Quality (CTQ) dimensions
    - Generates AI-suggested fixes for identified gaps
-   - Human review and approval before generation
+   - Human review and approval before proceeding to each stage
 
-2. **Artifact Generation**
-   - **Epics & User Stories** with acceptance criteria
-   - **Functional Test Cases** with detailed steps
-   - **Gherkin BDD Scenarios** for automated testing
-   - **Data Models** with entity-relationship diagrams (Mermaid)
-   - **Code Skeleton** (ASP.NET Core API structure)
+2. **Six-Stage Artifact Generation** (Stages 2-7)
+   - **Stage 2: Epics & User Stories** with acceptance criteria (editable, deletable)
+   - **Stage 3: Functional Test Cases** with detailed steps (editable, deletable)
+   - **Stage 4: Gherkin BDD Scenarios** for automated testing (editable, deletable)
+   - **Stage 5: Data Models** with entity-relationship diagrams (Mermaid)
+   - **Stage 6: Code Skeleton** (Java Selenium + Cucumber test automation framework)
+   - **Stage 7: Summary** with downloadable ZIP containing all artifacts
 
 ### Key Capabilities
 
-- **Document Parsing**: Supports .docx and .txt BRD files
+- **Document Parsing**: Supports .docx and .txt BRD files with section-based chunking
 - **AI-Powered Analysis**: Uses AWS Bedrock (Claude 3.5 Sonnet v2)
-- **Quality Validation**: 10-dimensional CTQ scoring system
-- **Interactive Review**: Review and edit AI suggestions before proceeding
-- **Real-time Progress**: Live updates during generation
-- **Downloadable Results**: Export all artifacts as ZIP
+- **Quality Validation**: 10-dimensional CTQ scoring system with AI-suggested gap fixes
+- **Interactive Review**: Review, edit, and approve each stage before progression
+- **Full CRUD Operations**: Edit and delete generated epics, stories, and tests
+- **Real-time Progress**: Live updates during generation with step-by-step tracking
+- **Java Test Automation**: Complete Selenium + Cucumber framework with POM pattern
+- **Downloadable Results**: Export all artifacts as ZIP with organized structure
 
 ---
 
@@ -235,20 +238,15 @@ npm run dev
 
 ### Using the Application
 
-#### Step 1: Upload BRD and Validate
+#### Stage 1: Upload BRD and Validate Quality
 
 1. Open `http://localhost:5173` in your browser
 2. Upload your BRD file (.docx or .txt, max 15MB)
-3. Configure which artifacts to generate:
-   - ✅ Epics & User Stories
-   - ✅ Data Model
-   - ✅ Functional Tests
-   - ✅ Gherkin Tests
-   - ✅ Code Skeleton
+3. Optionally provide custom instructions for generation
 4. Click **"Generate Artifacts"**
-5. Wait for validation to complete (~30 seconds)
+5. Wait for validation to complete (~30-60 seconds)
 
-#### Step 2: Review Validation Results
+#### Stage 2: Review Validation Results
 
 1. Review **Overall Quality Score** (0-5 scale)
 2. Examine **CTQ Dimension Scores** across 10 categories
@@ -257,13 +255,44 @@ npm run dev
    - **Accept** the AI suggestion as-is
    - **Edit & Accept** to modify the suggestion
    - **Reject** to discard the suggestion
+5. Click **"Proceed to EPICs & User Stories"**
 
-#### Step 3: Generate Artifacts
+#### Stages 3-7: Progressive Artifact Generation
 
-1. Click **"Proceed to Generation"** after reviewing gaps
-2. Monitor real-time progress as artifacts are generated
-3. Wait for completion (~2-5 minutes)
-4. Download results as ZIP file
+**Stage 3: EPICs & User Stories**
+- Review generated epics and user stories with acceptance criteria
+- Edit or delete any artifact using the UI
+- Click **"Generate More"** to create additional stories
+- Click **"Proceed to Functional Tests"** when satisfied
+
+**Stage 4: Functional Tests**
+- Review functional test cases linked to user stories
+- Edit or delete tests as needed
+- Generate more tests for specific stories
+- Click **"Proceed to Gherkin Tests"**
+
+**Stage 5: Gherkin Tests**
+- Review BDD scenarios in Gherkin format
+- Edit or delete scenarios
+- Generate additional Gherkin tests
+- Click **"Proceed to Data Model"**
+
+**Stage 6: Data Model**
+- Review entity-relationship model with Mermaid diagram
+- Visualize data structure interactively
+- Click **"Proceed to Code Generation"**
+
+**Stage 7: Code Skeleton**
+- Review generated Java Selenium + Cucumber framework
+- Explore file tree structure with POM pattern
+- Preview generated code files
+- Click **"Proceed to Summary"**
+
+#### Stage 8: Download and Complete
+
+1. Review all generated artifacts in summary view
+2. Download complete project as ZIP file
+3. ZIP contains organized folders with all artifacts
 
 ---
 
@@ -288,19 +317,22 @@ SpecPilot/
 ├── frontend/                  # React frontend
 │   ├── src/
 │   │   ├── components/        # Reusable UI components
-│   │   ├── pages/             # Page components
-│   │   │   ├── HomePage.tsx           # Upload page
-│   │   │   ├── ValidationPage.tsx     # Review page
-│   │   │   ├── ProgressPage.tsx       # Progress tracker
-│   │   │   └── ResultsPage.tsx        # Results viewer
+│   │   ├── pages/             # Page components (8 stages)
+│   │   │   ├── ConfigurationPage.tsx          # BRD upload
+│   │   │   ├── ValidationPage.tsx             # Quality review
+│   │   │   ├── EpicsRefinementPage.tsx        # EPICs & Stories
+│   │   │   ├── FunctionalTestsRefinementPage.tsx  # Functional Tests
+│   │   │   ├── GherkinTestsRefinementPage.tsx     # Gherkin Tests
+│   │   │   ├── DataModelPage.tsx              # Data Model
+│   │   │   ├── CodeSkeletonPage.tsx           # Code Preview
+│   │   │   └── SummaryPage.tsx                # Download
 │   │   ├── lib/               # Utilities and API client
 │   │   └── main.tsx           # Entry point
 │   └── package.json           # Node dependencies
 ├── docs/                      # Documentation
 │   ├── API.md                 # API reference
 │   ├── ARCHITECTURE.md        # System architecture
-│   ├── PROJECT_SPEC.md        # Original specification
-│   └── UI_IMPROVEMENTS.md     # UI enhancement log
+│   └── PROJECT_SPEC.md        # Original specification
 ├── .gitignore
 ├── README.md
 └── CONTRIBUTING.md            # Contribution guidelines
@@ -314,11 +346,25 @@ See [docs/API.md](docs/API.md) for complete API reference.
 
 ### Key Endpoints
 
-- `POST /api/validate-brd` - Upload and validate BRD
+**Staged Pipeline**:
+- `POST /api/validate-brd` - Upload and validate BRD (Stage 1)
 - `POST /api/update-gap-fix/{job_id}` - Update gap fix review
-- `POST /api/proceed-to-generation/{job_id}` - Start generation
+- `POST /api/proceed-to-stage/{job_id}` - Progress to next stage (Stages 2-7)
+- `POST /api/generate-more/{job_id}` - Generate additional artifacts at current stage
+
+**CRUD Operations**:
+- `PUT /api/epics/{epic_id}` - Update epic
+- `DELETE /api/epics/{epic_id}` - Delete epic (cascade delete stories)
+- `PUT /api/stories/{story_id}` - Update user story
+- `DELETE /api/stories/{story_id}` - Delete story (cascade delete tests)
+- `PUT /api/tests/{test_id}` - Update functional test
+- `DELETE /api/tests/{test_id}` - Delete functional test
+- `PUT /api/gherkin/{scenario_id}` - Update Gherkin scenario
+- `DELETE /api/gherkin/{scenario_id}` - Delete Gherkin scenario
+
+**Status and Download**:
 - `GET /api/status/{job_id}` - Poll for progress
-- `GET /api/download/{job_id}` - Download artifacts
+- `GET /api/download/{job_id}` - Download all artifacts as ZIP
 
 ---
 

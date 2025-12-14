@@ -1,6 +1,7 @@
 import json
 import time
 import os
+import re
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
@@ -63,7 +64,7 @@ class BedrockLLMClient:
 
                 request_body = {
                     "anthropic_version": "bedrock-2023-05-31",
-                    "max_tokens": 16384,  # Increased from 4096 to allow larger code generation responses
+                    "max_tokens": 32768,  # Increased to 32768 to allow full BRD processing and larger outputs
                     "messages": messages,
                     "temperature": 0.7,
                 }
@@ -139,22 +140,27 @@ class BedrockLLMClient:
                 existing_epics_text += f"{i}. {epic['name']}: {epic['description']}\n"
             existing_epics_text += "\nIMPORTANT: Do not regenerate these epics or create similar ones. Focus on NEW features.\n"
 
-        # Prepare context from BRD
+        # Prepare context from BRD - send ALL chunks with full content
         chunks = brd_data.get('chunks', [])
-        chunks_text = "\n".join([
-            f"Chunk {c['id']} ({c['type']}): {c['text'][:200]}"
-            for c in chunks[:30]  # Limit to first 30 chunks
+        chunks_text = "\n\n".join([
+            f"## Chunk {c['id']} - {c.get('section_title', 'Section ' + str(c.get('section_id', 'unknown')))}\n"
+            f"**Section ID**: {c.get('section_id', 'N/A')}\n"
+            f"**Type**: {c['type']}\n"
+            f"**Content**:\n{c['text']}"
+            for c in chunks  # Send ALL chunks, no limit
         ])
 
+        # Send ALL sections with full content
         sections_text = "\n\n".join([
-            f"Section {s['id']}: {s['title']}\n{s['text']}"
-            for s in brd_data.get('sections', [])[:10]  # Limit to first 10 sections
+            f"## Section {s['id']}: {s['title']}\n{s['text']}"
+            for s in brd_data.get('sections', [])  # Send ALL sections
         ])
 
+        # Send ALL tables with full rows
         tables_text = "\n\n".join([
-            f"Table {t['table_id']}: {', '.join(t['headers'])}\n" +
-            "\n".join([str(row) for row in t['rows'][:5]])
-            for t in brd_data.get('tables', [])[:5]  # Limit to first 5 tables
+            f"## Table {t['table_id']}: {', '.join(t['headers'])}\n" +
+            "\n".join([str(row) for row in t['rows']])
+            for t in brd_data.get('tables', [])  # Send ALL tables with ALL rows
         ])
 
         prompt = f"""Analyze this Business Requirements Document and generate:
@@ -238,8 +244,11 @@ Include source_chunks references to BRD sections where applicable.
 
         chunks_context = ""
         if brd_chunks:
-            chunks_context = "\n\nRelevant BRD Chunks:\n" + "\n".join([
-                f"Chunk {c['id']} ({c['type']}): {c['text'][:200]}"
+            chunks_context = "\n\n## Relevant BRD Chunks:\n\n" + "\n\n".join([
+                f"### Chunk {c['id']} - {c.get('section_title', 'Section ' + str(c.get('section_id', 'unknown')))}\n"
+                f"**Section ID**: {c.get('section_id', 'N/A')}\n"
+                f"**Type**: {c['type']}\n"
+                f"**Content**:\n{c['text']}"  # Full text, not truncated
                 for c in brd_chunks
             ])
 
@@ -279,13 +288,9 @@ Each test should be detailed, specific, and cover the acceptance criteria.
         self,
         user_stories: List[UserStory],
         functional_tests: List[FunctionalTest] = None,
-        instructions: str = "",
-        gap_fixes: List[Dict[str, str]] = None
+        instructions: str = ""
     ) -> Dict[str, Any]:
         """Call C: User Stories + Functional Tests → Gherkin scenarios"""
-
-        # Build gap fixes context
-        gap_fixes_text = self._build_gap_fixes_context(gap_fixes)
 
         stories_text = "\n\n".join([
             f"Story {s.id}: {s.title}\n"
@@ -309,7 +314,6 @@ Each test should be detailed, specific, and cover the acceptance criteria.
 User Stories:
 {stories_text}
 {functional_tests_text}
-{gap_fixes_text}
 
 Special Instructions:
 {instructions if instructions else 'None'}
@@ -348,14 +352,15 @@ Each scenario should follow BDD best practices with clear Given/When/Then steps.
         # Build gap fixes context
         gap_fixes_text = self._build_gap_fixes_context(gap_fixes)
 
-        # Focus on data-related sections and tables
+        # Send ALL tables with ALL rows (no limits)
         tables_text = "\n\n".join([
-            f"Table {t['table_id']}:\nHeaders: {', '.join(t['headers'])}\n" +
-            "\n".join([str(row) for row in t['rows'][:10]])
-            for t in brd_data.get('tables', [])
+            f"## Table {t['table_id']}:\nHeaders: {', '.join(t['headers'])}\n" +
+            "\n".join([str(row) for row in t['rows']])  # ALL rows
+            for t in brd_data.get('tables', [])  # ALL tables
         ])
 
-        stories_text = "\n".join([f"- {s.title}" for s in user_stories[:20]])
+        # Send ALL user stories
+        stories_text = "\n".join([f"- {s.title}" for s in user_stories])
 
         prompt = f"""Analyze this BRD and user stories to create a data model.
 
@@ -400,11 +405,12 @@ Generate a Mermaid ER diagram showing entities and relationships.
     ) -> Dict[str, Any]:
         """Generate Java Selenium + Cucumber test automation framework based on Gherkin tests and entities"""
 
-        # Import the helper
-        from app.services.java_code_generator import JavaCodeGenerator
+        # Generate base package name from project name (lowercase, no special chars)
+        package_name = re.sub(r'[^a-z0-9]', '', project_name.lower())
+        base_package = f"com.cacib.{package_name}"
 
-        # Initialize generator
-        generator = JavaCodeGenerator(project_name, "com.cacib")
+        # Convert project name to CamelCase for folder name
+        project_name_camel = ''.join(word.capitalize() for word in re.sub(r'[^a-zA-Z0-9\s]', '', project_name).split())
 
         # Format entities for model classes
         entities_text = "\n".join([
@@ -412,13 +418,21 @@ Generate a Mermaid ER diagram showing entities and relationships.
             for e in entities
         ])
 
-        # Extract Gherkin steps for glue code
+        # Count unique Gherkin steps directly for glue code generation
         gherkin_steps_info = ""
         unique_steps_count = 0
         if gherkin_tests:
-            steps_mapping = generator.extract_gherkin_steps_mapping(gherkin_tests)
-            unique_steps_count = sum(len(steps) for steps in steps_mapping.values())
-            gherkin_steps_info = f"\n\nGherkin Steps to Implement:\n- Given steps: {len(steps_mapping['given'])}\n- When steps: {len(steps_mapping['when'])}\n- Then steps: {len(steps_mapping['then'])}\n- Total unique steps: {unique_steps_count}"
+            given_steps = set()
+            when_steps = set()
+            then_steps = set()
+
+            for scenario in gherkin_tests:
+                given_steps.update(scenario.given)
+                when_steps.update(scenario.when)
+                then_steps.update(scenario.then)
+
+            unique_steps_count = len(given_steps) + len(when_steps) + len(then_steps)
+            gherkin_steps_info = f"\n\nGherkin Steps to Implement:\n- Given steps: {len(given_steps)}\n- When steps: {len(when_steps)}\n- Then steps: {len(then_steps)}\n- Total unique steps: {unique_steps_count}"
 
         # Format ALL Gherkin tests in detail (not just summary)
         gherkin_tests_text = ""
@@ -438,7 +452,7 @@ Generate a Mermaid ER diagram showing entities and relationships.
         prompt = f"""Generate a complete Java Selenium + Cucumber test automation framework.
 
 Project Name: {project_name}
-Base Package: {generator.base_package}
+Base Package: {base_package}
 
 Entities (for model classes):
 {entities_text}
@@ -452,8 +466,8 @@ Output must be valid JSON matching this exact schema:
     "framework": "selenium-cucumber",
     "build_tool": "maven",
     "test_framework": "junit5",
-    "base_package": "{generator.base_package}",
-    "root_folder": "{generator.project_name}",
+    "base_package": "{base_package}",
+    "root_folder": "{project_name_camel}",
     "folders": [
       {{
         "path": "path/to/folder",
@@ -483,14 +497,14 @@ A. Maven Configuration:
    - pom.xml (with Selenium 4.18.1, Cucumber 7.15.0, JUnit 5.10.1, WebDriverManager 5.6.3)
 
 B. Entity/Model Classes (from entities list):
-   - src/main/java/{generator.base_package.replace('.', '/')}/models/*.java
+   - src/main/java/{base_package.replace('.', '/')}/models/*.java
 
 C. Page Object Model Classes (inferred from tests):
-   - src/main/java/{generator.base_package.replace('.', '/')}/pages/*.java
+   - src/main/java/{base_package.replace('.', '/')}/pages/*.java
    - Include @FindBy annotations, constructor with WebDriver, element locators
 
 D. Cucumber Step Definitions (glue code for each Gherkin scenario):
-   - src/test/java/{generator.base_package.replace('.', '/')}/stepdefinitions/*.java
+   - src/test/java/{base_package.replace('.', '/')}/stepdefinitions/*.java
    - Implement methods for Given/When/Then steps with proper Cucumber expressions
    - Use Page Objects in step definitions
    - Add proper assertions using JUnit5 Assertions
@@ -500,13 +514,13 @@ E. Gherkin Feature Files:
    - One feature file per feature from gherkin_tests
 
 F. Test Runner:
-   - src/test/java/{generator.base_package.replace('.', '/')}/runners/TestRunner.java
+   - src/test/java/{base_package.replace('.', '/')}/runners/TestRunner.java
    - Configure Cucumber with proper plugin and glue options
 
 G. Utility Classes:
-   - src/main/java/{generator.base_package.replace('.', '/')}/utils/DriverManager.java (WebDriver management with WebDriverManager)
-   - src/main/java/{generator.base_package.replace('.', '/')}/utils/ConfigReader.java (Properties file reader)
-   - src/main/java/{generator.base_package.replace('.', '/')}/utils/WaitHelper.java (WebDriverWait utilities)
+   - src/main/java/{base_package.replace('.', '/')}/utils/DriverManager.java (WebDriver management with WebDriverManager)
+   - src/main/java/{base_package.replace('.', '/')}/utils/ConfigReader.java (Properties file reader)
+   - src/main/java/{base_package.replace('.', '/')}/utils/WaitHelper.java (WebDriverWait utilities)
 
 H. Configuration Files:
    - src/test/resources/config.properties (baseUrl, browser, timeouts)
@@ -517,13 +531,13 @@ I. Documentation:
 
 EXAMPLE Page Object (LoginPage.java):
 ```java
-package {generator.base_package}.pages;
+package {base_package}.pages;
 
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.FindBy;
 import org.openqa.selenium.support.PageFactory;
-import {generator.base_package}.utils.WaitHelper;
+import {base_package}.utils.WaitHelper;
 
 public class LoginPage {{
     private WebDriver driver;
@@ -571,15 +585,15 @@ public class LoginPage {{
 
 EXAMPLE Step Definition (LoginSteps.java):
 ```java
-package {generator.base_package}.stepdefinitions;
+package {base_package}.stepdefinitions;
 
 import io.cucumber.java.en.Given;
 import io.cucumber.java.en.When;
 import io.cucumber.java.en.Then;
 import org.openqa.selenium.WebDriver;
-import {generator.base_package}.pages.LoginPage;
-import {generator.base_package}.pages.DashboardPage;
-import {generator.base_package}.utils.DriverManager;
+import {base_package}.pages.LoginPage;
+import {base_package}.pages.DashboardPage;
+import {base_package}.utils.DriverManager;
 import static org.junit.jupiter.api.Assertions.*;
 
 public class LoginSteps {{
@@ -624,22 +638,25 @@ Generate ALL files as complete, working code. No TODOs. No placeholders. Product
     ) -> Dict[str, Any]:
         """Call F: BRD → 10 CTQ Validation Scores"""
 
-        # Prepare context from BRD
+        # Prepare context from BRD - send ALL content for comprehensive validation
         chunks = brd_data.get('chunks', [])
-        chunks_text = "\n".join([
-            f"Chunk {c['id']} ({c['type']}): {c['text'][:200]}"
-            for c in chunks[:30]
+        chunks_text = "\n\n".join([
+            f"## Chunk {c['id']} - {c.get('section_title', 'Section ' + str(c.get('section_id', 'unknown')))}\n"
+            f"**Section ID**: {c.get('section_id', 'N/A')}\n"
+            f"**Type**: {c['type']}\n"
+            f"**Content**:\n{c['text']}"
+            for c in chunks  # ALL chunks for complete validation
         ])
 
         sections_text = "\n\n".join([
-            f"Section {s['id']}: {s['title']}\n{s['text']}"
-            for s in brd_data.get('sections', [])[:10]
+            f"## Section {s['id']}: {s['title']}\n{s['text']}"
+            for s in brd_data.get('sections', [])  # ALL sections
         ])
 
         tables_text = "\n\n".join([
-            f"Table {t['table_id']}: {', '.join(t['headers'])}\n" +
-            "\n".join([str(row) for row in t['rows'][:5]])
-            for t in brd_data.get('tables', [])[:5]
+            f"## Table {t['table_id']}: {', '.join(t['headers'])}\n" +
+            "\n".join([str(row) for row in t['rows']])
+            for t in brd_data.get('tables', [])  # ALL tables with ALL rows
         ])
 
         prompt = f"""Evaluate this Business Requirements Document across 10 Critical-to-Quality (CTQ) dimensions.
@@ -758,9 +775,10 @@ Be specific and actionable in findings and recommendations.
     ) -> List[Dict[str, Any]]:
         """Call G: Validation Gaps → AI-Suggested Fixes"""
 
+        # Send ALL sections for comprehensive gap fix generation
         sections_text = "\n\n".join([
-            f"Section {s['id']}: {s['title']}\n{s['text']}"
-            for s in brd_data.get('sections', [])[:10]
+            f"## Section {s['id']}: {s['title']}\n{s['text']}"
+            for s in brd_data.get('sections', [])  # ALL sections
         ])
 
         gap_fixes = []

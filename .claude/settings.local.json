@@ -12,7 +12,10 @@
       "WebSearch",
       "Bash(find:*)",
       "Bash(chmod:*)",
-      "Bash([ -f .env ])"
+      "Bash([ -f .env ])",
+      "Bash(grep:*)",
+      "Bash(tree:*)",
+      "Bash(wc:*)"
     ],
     "deny": [],
     "ask": []

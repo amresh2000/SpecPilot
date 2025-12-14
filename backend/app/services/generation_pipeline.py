@@ -1,5 +1,4 @@
 import time
-import asyncio
 from typing import Dict, Any
 from app.services.job_manager import job_manager
 from app.services.brd_parser import BRDParser
@@ -8,10 +7,15 @@ from app.models import (
     JobStatus, StepStatus, Epic, UserStory, AcceptanceCriterion,
     FunctionalTest, GherkinScenario, Entity, EntityField, CodeSkeleton
 )
+from app.utils import log_info, log_error, extract_applied_gap_fixes
 
 
 class GenerationPipeline:
-    """Orchestrates the entire generation process"""
+    """
+    Stage-by-stage generation orchestrator.
+
+    Methods are called by staged_endpoints.py for the staged workflow.
+    """
 
     def __init__(self, job_id: str, file_path: str):
         self.job_id = job_id
@@ -19,64 +23,8 @@ class GenerationPipeline:
         self.parser = BRDParser()
         self.llm_client = BedrockLLMClient()
 
-        # Extract applied gap fixes
         job = job_manager.get_job(job_id)
-        self.gap_fixes = self._get_applied_gap_fixes(job)
-
-    async def run(self):
-        """Execute the complete generation pipeline"""
-        job = job_manager.get_job(self.job_id)
-        if not job:
-            return
-
-        try:
-            job_manager.update_job_status(self.job_id, JobStatus.RUNNING)
-
-            # Step 1: Parse BRD
-            await self._parse_brd()
-
-            # Step 2: Generate EPICs and User Stories
-            if job.artefacts.epics_and_stories:
-                await self._generate_epics_and_stories()
-                await asyncio.sleep(10)  # Rate limiting delay (increased to 10 seconds)
-
-            # Step 3: Generate Data Model
-            if job.artefacts.data_model and job.results.user_stories:
-                await self._generate_data_model()
-                await asyncio.sleep(10)  # Rate limiting delay (increased to 10 seconds)
-
-            # Step 4: Generate Functional Tests
-            if job.artefacts.functional_tests and job.results.user_stories:
-                await self._generate_functional_tests()
-                await asyncio.sleep(10)  # Rate limiting delay (increased to 10 seconds)
-
-            # Step 5: Generate Gherkin Tests
-            if job.artefacts.gherkin_tests and job.results.user_stories:
-                await self._generate_gherkin_tests()
-                await asyncio.sleep(10)  # Rate limiting delay (increased to 10 seconds)
-
-            # Step 6: Generate Code Skeleton (Non-breaking - optional step)
-            if job.artefacts.code_skeleton and job.results.entities:
-                try:
-                    await self._generate_code_skeleton()
-                except Exception as e:
-                    # Code generation is optional - don't fail entire pipeline
-                    import logging
-                    logger = logging.getLogger(__name__)
-                    logger.warning(f"Code skeleton generation failed (non-critical): {str(e)}")
-                    job.update_step("Generating Code Skeleton", StepStatus.FAILED)
-                    # Continue with other artifacts
-
-            # Mark job as completed
-            job_manager.update_job_status(self.job_id, JobStatus.COMPLETED)
-
-        except Exception as e:
-            job.mark_failed(str(e))
-            # Mark current running step as failed
-            for step in job.steps:
-                if step.status == StepStatus.RUNNING:
-                    step.status = StepStatus.FAILED
-                    break
+        self.gap_fixes = extract_applied_gap_fixes(job.results.gap_fixes if job and job.results else [])
 
     async def _parse_brd(self):
         """Parse the BRD document"""
@@ -86,7 +34,6 @@ class GenerationPipeline:
         try:
             job.update_step("Parsing documents", StepStatus.RUNNING)
 
-            # Parse the document
             brd_data = self.parser.parse(self.file_path)
             job.brd_data = brd_data
 
@@ -100,30 +47,23 @@ class GenerationPipeline:
     async def _generate_epics_and_stories(self):
         """Generate project name, EPICs, and User Stories"""
         job = job_manager.get_job(self.job_id)
-
-        # Project name step
         start_time = time.time()
         job.update_step("Generating project name", StepStatus.RUNNING)
 
         try:
-            # Call LLM
             result = self.llm_client.generate_epics_and_stories(
                 job.brd_data,
                 job.instructions,
                 self.gap_fixes
             )
 
-            # Parse and store results
             job.results.project_name = result.get('project_name', 'Untitled Project')
 
-            # Parse EPICs
             for epic_data in result.get('epics', []):
                 epic = Epic(**epic_data)
                 job.results.epics.append(epic)
 
-            # Parse User Stories
             for story_data in result.get('user_stories', []):
-                # Parse acceptance criteria
                 acs = []
                 for ac_data in story_data.get('acceptance_criteria', []):
                     ac = AcceptanceCriterion(**ac_data)
@@ -135,8 +75,6 @@ class GenerationPipeline:
 
             duration_ms = int((time.time() - start_time) * 1000)
             job.update_step("Generating project name", StepStatus.COMPLETED, duration_ms)
-
-            # EPICs and stories step (same call, mark as completed immediately)
             job.update_step("Generating EPICs & User Stories", StepStatus.COMPLETED, 0)
 
         except Exception as e:
@@ -151,7 +89,6 @@ class GenerationPipeline:
         try:
             job.update_step("Generating Functional Tests", StepStatus.RUNNING)
 
-            # Collect chunk IDs from user stories
             chunk_ids = set()
             for story in job.results.user_stories:
                 if story.source_chunks:
@@ -160,13 +97,11 @@ class GenerationPipeline:
                     if ac.source_chunks:
                         chunk_ids.update(ac.source_chunks)
 
-            # Retrieve chunk data from BRD
             brd_chunks = []
             if job.brd_data and chunk_ids:
                 all_chunks = job.brd_data.get('chunks', [])
                 brd_chunks = [c for c in all_chunks if c['id'] in chunk_ids]
 
-            # Call LLM with chunks
             result = self.llm_client.generate_functional_tests(
                 job.results.user_stories,
                 job.instructions,
@@ -174,7 +109,6 @@ class GenerationPipeline:
                 self.gap_fixes
             )
 
-            # Parse and store results
             for test_data in result.get('functional_tests', []):
                 test = FunctionalTest(**test_data)
                 job.results.functional_tests.append(test)
@@ -194,15 +128,12 @@ class GenerationPipeline:
         try:
             job.update_step("Generating Gherkin Tests", StepStatus.RUNNING)
 
-            # Call LLM with functional tests as context
             result = self.llm_client.generate_gherkin_tests(
                 job.results.user_stories,
                 job.results.functional_tests,
-                "",  # No additional instructions in pipeline
-                self.gap_fixes
+                ""
             )
 
-            # Parse and store results
             for scenario_data in result.get('gherkin_tests', []):
                 scenario = GherkinScenario(**scenario_data)
                 job.results.gherkin_tests.append(scenario)
@@ -222,16 +153,13 @@ class GenerationPipeline:
         try:
             job.update_step("Generating Data Model", StepStatus.RUNNING)
 
-            # Call LLM
             result = self.llm_client.generate_data_model(
                 job.brd_data,
                 job.results.user_stories,
                 self.gap_fixes
             )
 
-            # Parse and store entities
             for entity_data in result.get('entities', []):
-                # Parse fields
                 fields = []
                 for field_data in entity_data.get('fields', []):
                     field = EntityField(**field_data)
@@ -241,7 +169,6 @@ class GenerationPipeline:
                 entity = Entity(**entity_data)
                 job.results.entities.append(entity)
 
-            # Store Mermaid diagram
             job.results.mermaid = result.get('mermaid', '')
 
             duration_ms = int((time.time() - start_time) * 1000)
@@ -259,18 +186,14 @@ class GenerationPipeline:
         try:
             job.update_step("Generating Code Skeleton", StepStatus.RUNNING)
 
-            # Call LLM with ALL gherkin tests and entities for POM and glue code generation
             result = self.llm_client.generate_code_skeleton(
                 job.results.project_name,
                 job.results.entities,
                 gherkin_tests=job.results.gherkin_tests
             )
 
-            # Parse and store code skeleton
             skeleton_data = result.get('code_skeleton', {})
             job.results.code_skeleton = CodeSkeleton(**skeleton_data)
-
-            # Build tree view for frontend
             job.results.code_tree = self._build_tree_view(job.results.code_skeleton)
 
             duration_ms = int((time.time() - start_time) * 1000)
@@ -278,24 +201,20 @@ class GenerationPipeline:
 
         except Exception as e:
             job.update_step("Generating Code Skeleton", StepStatus.FAILED)
-            # Don't raise - let it be handled by the calling code
             import logging
             logger = logging.getLogger(__name__)
             logger.error(f"Failed to generate code skeleton: {str(e)}", exc_info=True)
-            raise  # Re-raise so outer try-catch can handle gracefully
+            raise
 
     def _build_tree_view(self, skeleton: CodeSkeleton) -> list:
         """Build a tree structure for frontend display"""
         tree = []
 
         for folder in skeleton.folders:
-            # Split path into parts
             parts = folder.path.split('/')
 
-            # Build tree structure
             current = tree
             for part in parts:
-                # Find or create node
                 node = next((n for n in current if n.get('name') == part and n.get('type') == 'folder'), None)
                 if not node:
                     node = {
@@ -306,7 +225,6 @@ class GenerationPipeline:
                     current.append(node)
                 current = node['children']
 
-            # Add files to the current folder
             for file in folder.files:
                 current.append({
                     'name': file.name,
@@ -316,24 +234,3 @@ class GenerationPipeline:
                 })
 
         return tree
-
-    def _get_applied_gap_fixes(self, job):
-        """Extract gap fixes that user accepted or edited"""
-        applied = []
-        if not job or not job.results or not job.results.gap_fixes:
-            return applied
-
-        for gf in job.results.gap_fixes:
-            if gf.user_action == "accept":
-                applied.append({
-                    "type": gf.gap_type,
-                    "issue": gf.issue,
-                    "correction": gf.suggestion
-                })
-            elif gf.user_action == "edit" and gf.final_text:
-                applied.append({
-                    "type": gf.gap_type,
-                    "issue": gf.issue,
-                    "correction": gf.final_text
-                })
-        return applied

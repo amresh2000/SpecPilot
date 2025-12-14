@@ -1,12 +1,10 @@
-"""
-Staged Pipeline Endpoints
-New endpoints for the stage-by-stage workflow
-"""
+"""Staged Pipeline Endpoints"""
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks
-from app.models import PipelineStage, GenerateMoreRequest
+from app.models import PipelineStage, GenerateMoreRequest, ProceedToStageRequest
 from app.services.job_manager import job_manager
 from app.services.generation_pipeline import GenerationPipeline
+from app.utils import log_info, log_error, extract_applied_gap_fixes
 from pathlib import Path
 
 router = APIRouter()
@@ -14,31 +12,24 @@ GENERATED_DIR = Path("generated")
 
 
 @router.post("/proceed-to-stage/{job_id}")
-async def proceed_to_stage(
-    job_id: str,
-    background_tasks: BackgroundTasks,
-    next_stage: str
-):
+async def proceed_to_stage(job_id: str, request: ProceedToStageRequest, background_tasks: BackgroundTasks):
     """Progress to the next pipeline stage after user approval"""
     try:
+        log_info("Proceeding to stage", job_id=job_id, next_stage=request.next_stage.value)
+
         job = job_manager.get_job(job_id)
         if not job:
+            log_error("Job not found", job_id=job_id)
             raise HTTPException(status_code=404, detail="Job not found")
 
-        # Parse next stage
-        try:
-            stage = PipelineStage(next_stage)
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid stage: {next_stage}")
+        stage = request.next_stage
 
-        # Check if this stage has already been completed
         stage_already_completed = any(
             s.stage == stage and s.status == "completed"
             for s in job.stage_history
         )
 
         if stage_already_completed:
-            # Just update current_stage, don't regenerate
             job.current_stage = stage
             return {
                 "job_id": job_id,
@@ -47,10 +38,8 @@ async def proceed_to_stage(
                 "message": "Stage already completed, skipping regeneration"
             }
 
-        # Advance to next stage
         job.advance_stage(stage)
 
-        # Find uploaded file
         job_dir = GENERATED_DIR / job_id
         uploaded_files = list(job_dir.glob("brd.*"))
         if not uploaded_files:
@@ -58,12 +47,10 @@ async def proceed_to_stage(
 
         uploaded_file_path = str(uploaded_files[0])
 
-        # Run stage-specific generation in background
         async def run_stage_generation():
             try:
                 pipeline = GenerationPipeline(job_id, uploaded_file_path)
 
-                # Parse BRD if not already done (critical for first stage)
                 if not job.brd_data:
                     await pipeline._parse_brd()
 
@@ -78,7 +65,6 @@ async def proceed_to_stage(
                 elif stage == PipelineStage.CODE_GENERATION:
                     await pipeline._generate_code_skeleton()
 
-                # Mark stage as completed
                 job.complete_current_stage()
 
             except Exception as e:
@@ -124,22 +110,8 @@ async def generate_more(
                 from app.services.llm_client import BedrockLLMClient
                 llm_client = BedrockLLMClient()
 
-                # Extract applied gap fixes
-                gap_fixes = []
-                if job.results and job.results.gap_fixes:
-                    for gf in job.results.gap_fixes:
-                        if gf.user_action == "accept":
-                            gap_fixes.append({
-                                "type": gf.gap_type,
-                                "issue": gf.issue,
-                                "correction": gf.suggestion
-                            })
-                        elif gf.user_action == "edit" and gf.final_text:
-                            gap_fixes.append({
-                                "type": gf.gap_type,
-                                "issue": gf.issue,
-                                "correction": gf.final_text
-                            })
+                # Extract applied gap fixes using utility function
+                gap_fixes = extract_applied_gap_fixes(job.results.gap_fixes if job.results else [])
 
                 if request.stage == PipelineStage.EPICS:
                     # Build list of existing epics to avoid duplication
@@ -177,6 +149,13 @@ async def generate_more(
                     stories_to_use = job.results.user_stories
                     if request.context_ids:
                         stories_to_use = [s for s in job.results.user_stories if s.id in request.context_ids]
+                        log_info(
+                            "Filtering stories for Functional Tests generation",
+                            job_id=job_id,
+                            total_stories=len(job.results.user_stories),
+                            filtered_stories=len(stories_to_use),
+                            context_ids=request.context_ids
+                        )
 
                     # Collect chunk IDs from stories
                     chunk_ids = set()
@@ -210,12 +189,33 @@ async def generate_more(
                     stories_to_use = job.results.user_stories
                     if request.context_ids:
                         stories_to_use = [s for s in job.results.user_stories if s.id in request.context_ids]
+                        log_info(
+                            "Filtering stories for Gherkin generation",
+                            job_id=job_id,
+                            total_stories=len(job.results.user_stories),
+                            filtered_stories=len(stories_to_use),
+                            context_ids=request.context_ids
+                        )
 
+                    # Filter functional tests to match filtered stories
+                    functional_tests_to_use = job.results.functional_tests
+                    if request.context_ids:
+                        functional_tests_to_use = [
+                            ft for ft in job.results.functional_tests
+                            if ft.story_id in request.context_ids
+                        ]
+                        log_info(
+                            "Filtering functional tests for Gherkin generation",
+                            job_id=job_id,
+                            total_tests=len(job.results.functional_tests),
+                            filtered_tests=len(functional_tests_to_use)
+                        )
+
+                    # Gap fixes already incorporated into functional tests
                     result = llm_client.generate_gherkin_tests(
                         stories_to_use,
-                        job.results.functional_tests,  # Pass functional tests as context
-                        request.instructions,
-                        gap_fixes
+                        functional_tests_to_use,  # Pass filtered functional tests as context
+                        request.instructions
                     )
 
                     from app.models import GherkinScenario

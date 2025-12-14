@@ -190,6 +190,53 @@ class GenerateMoreRequest(BaseModel):
     context_ids: List[str] = []
 
 
+# Request models for updating artifacts (replacing FormData)
+class UpdateEpicRequest(BaseModel):
+    name: str
+    description: str
+
+
+class UpdateStoryRequest(BaseModel):
+    title: str
+    role: str
+    goal: str
+    benefit: str
+
+
+class UpdateAcceptanceCriteriaRequest(BaseModel):
+    criteria: List[str]
+
+
+class UpdateFunctionalTestRequest(BaseModel):
+    title: str
+    objective: str
+    preconditions: List[str]
+    test_steps: List[str]
+    expected_results: List[str]
+
+
+class UpdateGherkinTestRequest(BaseModel):
+    feature_name: str
+    scenario_name: str
+    given: List[str]
+    when: List[str]
+    then: List[str]
+
+
+class UpdateGapFixRequest(BaseModel):
+    gap_id: str
+    action: str  # "accepted" | "edited" | "rejected"
+    final_text: Optional[str] = None
+
+
+class ProceedToStageRequest(BaseModel):
+    next_stage: PipelineStage
+
+
+class DeleteTestRequest(BaseModel):
+    test_type: str  # "functional" | "gherkin"
+
+
 class StatusResponse(BaseModel):
     status: JobStatus
     current_stage: Optional[PipelineStage] = None

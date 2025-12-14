@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import generation, staged_endpoints
+from app.routes import shared_endpoints, staged_endpoints
 from app.config import config
 
 # Load and validate configuration at startup
@@ -26,7 +26,7 @@ app.add_middleware(
 )
 
 # Include routes
-app.include_router(generation.router, prefix="/api")
+app.include_router(shared_endpoints.router, prefix="/api")
 app.include_router(staged_endpoints.router, prefix="/api")
 
 @app.get("/health")

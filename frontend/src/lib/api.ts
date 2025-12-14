@@ -65,17 +65,10 @@ export const api = {
     action: string,
     finalText?: string
   ): Promise<any> {
-    const formData = new FormData();
-    formData.append('gap_id', gapId);
-    formData.append('action', action);
-    if (finalText) {
-      formData.append('final_text', finalText);
-    }
-
-    const response = await axios.post(`${API_BASE_URL}/update-gap-fix/${jobId}`, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
+    const response = await axios.post(`${API_BASE_URL}/update-gap-fix/${jobId}`, {
+      gap_id: gapId,
+      action,
+      final_text: finalText,
     });
 
     return response.data;
@@ -87,18 +80,9 @@ export const api = {
     name: string,
     description: string
   ): Promise<any> {
-    const formData = new FormData();
-    formData.append('name', name);
-    formData.append('description', description);
-
     const response = await axios.put(
       `${API_BASE_URL}/update-epic/${jobId}/${epicId}`,
-      formData,
-      {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      }
+      { name, description }
     );
 
     return response.data;
@@ -112,20 +96,9 @@ export const api = {
     goal: string,
     benefit: string
   ): Promise<any> {
-    const formData = new FormData();
-    formData.append('title', title);
-    formData.append('role', role);
-    formData.append('goal', goal);
-    formData.append('benefit', benefit);
-
     const response = await axios.put(
       `${API_BASE_URL}/update-story/${jobId}/${storyId}`,
-      formData,
-      {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      }
+      { title, role, goal, benefit }
     );
 
     return response.data;
@@ -136,35 +109,14 @@ export const api = {
     storyId: string,
     criteria: string[]
   ): Promise<any> {
-    const formData = new FormData();
-    formData.append('criteria', JSON.stringify(criteria));
-
     const response = await axios.put(
       `${API_BASE_URL}/update-acceptance-criteria/${jobId}/${storyId}`,
-      formData,
-      {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      }
+      { criteria }
     );
 
     return response.data;
   },
 
-  async regenerateStoryTests(jobId: string, storyId: string): Promise<any> {
-    const response = await axios.post(
-      `${API_BASE_URL}/regenerate-story-tests/${jobId}/${storyId}`
-    );
-    return response.data;
-  },
-
-  async regenerateStoryEntities(jobId: string, storyId: string): Promise<any> {
-    const response = await axios.post(
-      `${API_BASE_URL}/regenerate-story-entities/${jobId}/${storyId}`
-    );
-    return response.data;
-  },
 
   async deleteEpic(jobId: string, epicId: string): Promise<any> {
     const response = await axios.delete(
@@ -181,16 +133,10 @@ export const api = {
   },
 
   async deleteTest(jobId: string, testId: string, testType: 'functional' | 'gherkin'): Promise<any> {
-    const formData = new FormData();
-    formData.append('test_type', testType);
-
     const response = await axios.delete(
       `${API_BASE_URL}/delete-test/${jobId}/${testId}`,
       {
-        data: formData,
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
+        data: { test_type: testType },
       }
     );
     return response.data;
@@ -205,20 +151,14 @@ export const api = {
     testSteps: string[],
     expectedResults: string[]
   ): Promise<any> {
-    const formData = new FormData();
-    formData.append('title', title);
-    formData.append('objective', objective);
-    formData.append('preconditions', JSON.stringify(preconditions));
-    formData.append('test_steps', JSON.stringify(testSteps));
-    formData.append('expected_results', JSON.stringify(expectedResults));
-
     const response = await axios.put(
       `${API_BASE_URL}/update-functional-test/${jobId}/${testId}`,
-      formData,
       {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
+        title,
+        objective,
+        preconditions,
+        test_steps: testSteps,
+        expected_results: expectedResults,
       }
     );
 
@@ -234,20 +174,14 @@ export const api = {
     when: string[],
     then: string[]
   ): Promise<any> {
-    const formData = new FormData();
-    formData.append('feature_name', featureName);
-    formData.append('scenario_name', scenarioName);
-    formData.append('given', JSON.stringify(given));
-    formData.append('when', JSON.stringify(when));
-    formData.append('then', JSON.stringify(then));
-
     const response = await axios.put(
       `${API_BASE_URL}/update-gherkin-test/${jobId}/${testId}`,
-      formData,
       {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
+        feature_name: featureName,
+        scenario_name: scenarioName,
+        given,
+        when,
+        then,
       }
     );
 
@@ -257,7 +191,8 @@ export const api = {
   // Staged Pipeline Endpoints
   async proceedToStage(jobId: string, nextStage: PipelineStage): Promise<any> {
     const response = await axios.post(
-      `${API_BASE_URL}/proceed-to-stage/${jobId}?next_stage=${nextStage}`
+      `${API_BASE_URL}/proceed-to-stage/${jobId}`,
+      { next_stage: nextStage }
     );
     return response.data;
   },

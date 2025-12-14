@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Edit2, Check, X, Plus, Trash2, RefreshCw, AlertCircle } from 'lucide-react';
+import { Edit2, Check, X, Plus, Trash2 } from 'lucide-react';
 import { useToast } from './ui/ToastContainer';
 import { api } from '../lib/api';
 import type { UserStory } from '../types';
@@ -21,7 +21,6 @@ export const EditableStory: React.FC<EditableStoryProps> = ({ story, jobId, onUp
   );
   const [newCriterion, setNewCriterion] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  const [isRegenerating, setIsRegenerating] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const toast = useToast();
 
@@ -89,23 +88,6 @@ export const EditableStory: React.FC<EditableStoryProps> = ({ story, jobId, onUp
     setIsEditMode(false);
   };
 
-  const handleRegenerateTests = async () => {
-    setIsRegenerating(true);
-    try {
-      await api.regenerateStoryTests(jobId, story.id);
-      toast.success('Test regeneration started. Tests will update shortly.');
-
-      // Poll for updates after a delay
-      setTimeout(() => {
-        onUpdate();
-      }, 5000);
-    } catch (error) {
-      toast.error('Failed to regenerate tests');
-    } finally {
-      setIsRegenerating(false);
-    }
-  };
-
   const handleDelete = async () => {
     if (!confirm(`Are you sure you want to delete story "${story.title}" and all its associated tests?`)) {
       return;
@@ -123,18 +105,8 @@ export const EditableStory: React.FC<EditableStoryProps> = ({ story, jobId, onUp
     }
   };
 
-  // Check if any tests exist for this story (functional or gherkin)
-  const hasTests = story.has_functional_tests || story.has_gherkin_tests;
-  const showRegenerationWarning = story.regeneration_needed && hasTests;
-
   return (
-    <div className={`border-l-4 ${showRegenerationWarning ? 'border-orange-500 bg-orange-50' : 'border-blue-500'} pl-4 py-2 rounded-r-lg`}>
-      {showRegenerationWarning && (
-        <div className="mb-2 flex items-center gap-2 text-sm text-orange-700 bg-orange-100 p-2 rounded">
-          <AlertCircle className="w-4 h-4" />
-          <span className="font-medium">Story edited - tests need regeneration</span>
-        </div>
-      )}
+    <div className="border-l-4 border-blue-500 pl-4 py-2 rounded-r-lg">
       <div className="flex items-start justify-between mb-2">
         <div className="flex-1">
           {isEditMode ? (
@@ -151,16 +123,6 @@ export const EditableStory: React.FC<EditableStoryProps> = ({ story, jobId, onUp
         </div>
         {!isEditMode && (
           <div className="flex gap-2 ml-2">
-            {showRegenerationWarning && (
-              <button
-                onClick={handleRegenerateTests}
-                disabled={isRegenerating}
-                className="p-1 text-orange-600 hover:text-orange-700 hover:bg-orange-100 rounded transition-colors disabled:opacity-50"
-                title="Regenerate tests for this story"
-              >
-                <RefreshCw className={`w-4 h-4 ${isRegenerating ? 'animate-spin' : ''}`} />
-              </button>
-            )}
             <button
               onClick={() => setIsEditMode(true)}
               disabled={isDeleting}
@@ -171,7 +133,7 @@ export const EditableStory: React.FC<EditableStoryProps> = ({ story, jobId, onUp
             </button>
             <button
               onClick={handleDelete}
-              disabled={isDeleting || isRegenerating}
+              disabled={isDeleting}
               className="p-1 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50"
               title="Delete story and all tests"
             >

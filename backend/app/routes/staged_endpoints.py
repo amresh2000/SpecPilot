@@ -33,7 +33,7 @@ async def proceed_to_stage(job_id: str, request: ProceedToStageRequest, backgrou
             job.current_stage = stage
             return {
                 "job_id": job_id,
-                "stage": next_stage,
+                "stage": stage,
                 "status": "already_completed",
                 "message": "Stage already completed, skipping regeneration"
             }
@@ -74,7 +74,7 @@ async def proceed_to_stage(job_id: str, request: ProceedToStageRequest, backgrou
 
         return {
             "job_id": job_id,
-            "stage": next_stage,
+            "stage": stage,
             "status": "started"
         }
 

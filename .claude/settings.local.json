@@ -15,7 +15,8 @@
       "Bash([ -f .env ])",
       "Bash(grep:*)",
       "Bash(tree:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(source:*)"
     ],
     "deny": [],
     "ask": []

@@ -23,6 +23,14 @@ from .schemas import (
     PipelineStage,
     StageState,
     GenerateMoreRequest,
+    UpdateEpicRequest,
+    UpdateStoryRequest,
+    UpdateAcceptanceCriteriaRequest,
+    UpdateFunctionalTestRequest,
+    UpdateGherkinTestRequest,
+    UpdateGapFixRequest,
+    ProceedToStageRequest,
+    DeleteTestRequest,
 )
 
 __all__ = [
@@ -50,4 +58,12 @@ __all__ = [
     "PipelineStage",
     "StageState",
     "GenerateMoreRequest",
+    "UpdateEpicRequest",
+    "UpdateStoryRequest",
+    "UpdateAcceptanceCriteriaRequest",
+    "UpdateFunctionalTestRequest",
+    "UpdateGherkinTestRequest",
+    "UpdateGapFixRequest",
+    "ProceedToStageRequest",
+    "DeleteTestRequest",
 ]

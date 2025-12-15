@@ -53,6 +53,7 @@ class BedrockLLMClient:
         self.max_retries = 5  # Increased from 1 to 5
         self.base_delay = 2  # Base delay in seconds for exponential backoff
 
+
     def _invoke_claude(self, prompt: str, system_prompt: str = "") -> Dict[str, Any]:
         """Invoke Claude with exponential backoff retry logic for throttling"""
         last_error = None
@@ -80,10 +81,31 @@ class BedrockLLMClient:
 
                 # Parse response
                 response_body = json.loads(response['body'].read())
-                content = response_body['content'][0]['text']
+                content = response_body['content'][0]['text'].strip()
 
-                # Try to parse as JSON
-                return json.loads(content)
+                # Try to parse JSON directly first
+                try:
+                    return json.loads(content)
+                except json.JSONDecodeError:
+                    # Try extracting from markdown code block
+                    match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', content, re.DOTALL)
+                    if match:
+                        print(f"WARNING: Claude returned markdown-wrapped JSON, extracting from code block...")
+                        return json.loads(match.group(1).strip())
+
+                    # Last resort: extract from first { to last }
+                    start = content.find('{')
+                    end = content.rfind('}')
+                    if start != -1 and end > start:
+                        print(f"WARNING: Extracting JSON from mixed content (found {{ at {start}, }} at {end})...")
+                        return json.loads(content[start:end+1])
+
+                    # If all extraction failed, raise with helpful error
+                    raise json.JSONDecodeError(
+                        f"Could not extract JSON. Response preview: {content[:300]}...",
+                        content,
+                        0
+                    )
 
             except json.JSONDecodeError as e:
                 # JSON parsing error - retry with exponential backoff
@@ -217,7 +239,24 @@ Make acceptance criteria specific and testable.
 Include source_chunks references to BRD sections where applicable.
 """
 
-        system_prompt = "You are an expert business analyst. Output only valid JSON, no markdown formatting."
+        system_prompt = """You are an expert business analyst.
+
+CRITICAL JSON FORMAT REQUIREMENTS:
+- Your response MUST be ONLY valid JSON
+- Start with { character and end with } character
+- NO markdown code blocks (no ``` or ```json)
+- NO explanatory text before or after the JSON
+- NO comments inside the JSON
+
+Correct format example:
+{"project_name": "System", "epics": [], "user_stories": []}
+
+INCORRECT format (DO NOT DO THIS):
+```json
+{"project_name": "System"}
+```
+
+Begin your response now with { character:"""
 
         return self._invoke_claude(prompt, system_prompt)
 
@@ -280,7 +319,24 @@ Output must be valid JSON matching this schema:
 Each test should be detailed, specific, and cover the acceptance criteria.
 """
 
-        system_prompt = "You are an expert QA engineer. Output only valid JSON, no markdown formatting."
+        system_prompt = """You are an expert QA engineer.
+
+CRITICAL JSON FORMAT REQUIREMENTS:
+- Your response MUST be ONLY valid JSON
+- Start with { character and end with } character
+- NO markdown code blocks (no ``` or ```json)
+- NO explanatory text before or after the JSON
+- NO comments inside the JSON
+
+Correct format example:
+{"functional_tests": []}
+
+INCORRECT format (DO NOT DO THIS):
+```json
+{"functional_tests": []}
+```
+
+Begin your response now with { character:"""
 
         return self._invoke_claude(prompt, system_prompt)
 
@@ -337,7 +393,24 @@ Output must be valid JSON matching this schema:
 Each scenario should follow BDD best practices with clear Given/When/Then steps.
 """
 
-        system_prompt = "You are an expert in BDD and Gherkin syntax. Output only valid JSON, no markdown formatting."
+        system_prompt = """You are an expert in BDD and Gherkin syntax.
+
+CRITICAL JSON FORMAT REQUIREMENTS:
+- Your response MUST be ONLY valid JSON
+- Start with { character and end with } character
+- NO markdown code blocks (no ``` or ```json)
+- NO explanatory text before or after the JSON
+- NO comments inside the JSON
+
+Correct format example:
+{"gherkin_tests": []}
+
+INCORRECT format (DO NOT DO THIS):
+```json
+{"gherkin_tests": []}
+```
+
+Begin your response now with { character:"""
 
         return self._invoke_claude(prompt, system_prompt)
 
@@ -393,7 +466,24 @@ Create a comprehensive entity-relationship model.
 Generate a Mermaid ER diagram showing entities and relationships.
 """
 
-        system_prompt = "You are an expert data architect. Output only valid JSON, no markdown formatting."
+        system_prompt = """You are an expert data architect.
+
+CRITICAL JSON FORMAT REQUIREMENTS:
+- Your response MUST be ONLY valid JSON
+- Start with { character and end with } character
+- NO markdown code blocks (no ``` or ```json)
+- NO explanatory text before or after the JSON
+- NO comments inside the JSON
+
+Correct format example:
+{"entities": [], "mermaid": "erDiagram"}
+
+INCORRECT format (DO NOT DO THIS):
+```json
+{"entities": []}
+```
+
+Begin your response now with { character:"""
 
         return self._invoke_claude(prompt, system_prompt)
 
@@ -628,7 +718,24 @@ public class LoginSteps {{
 Generate ALL files as complete, working code. No TODOs. No placeholders. Production-ready test automation framework.
 """
 
-        system_prompt = "You are an expert Java test automation architect specializing in Selenium and Cucumber. Generate complete, production-ready code. Output only valid JSON with no markdown formatting."
+        system_prompt = """You are an expert Java test automation architect specializing in Selenium and Cucumber.
+
+CRITICAL JSON FORMAT REQUIREMENTS:
+- Your response MUST be ONLY valid JSON
+- Start with { character and end with } character
+- NO markdown code blocks (no ``` or ```json)
+- NO explanatory text before or after the JSON
+- NO comments inside the JSON
+
+Correct format example:
+{"code_skeleton": {"language": "java"}}
+
+INCORRECT format (DO NOT DO THIS):
+```json
+{"code_skeleton": {"language": "java"}}
+```
+
+Begin your response now with { character:"""
 
         return self._invoke_claude(prompt, system_prompt)
 
@@ -764,7 +871,24 @@ Output ONLY valid JSON matching this exact schema:
 Be specific and actionable in findings and recommendations.
 """
 
-        system_prompt = "You are an expert Business Analyst and Quality Assurance specialist. Output only valid JSON, no markdown formatting."
+        system_prompt = """You are an expert Business Analyst and Quality Assurance specialist.
+
+CRITICAL JSON FORMAT REQUIREMENTS:
+- Your response MUST be ONLY valid JSON
+- Start with { character and end with } character
+- NO markdown code blocks (no ``` or ```json)
+- NO explanatory text before or after the JSON
+- NO comments inside the JSON
+
+Correct format example:
+{"ctq_scores": {"completeness": 4}, "overall_score": 3.5}
+
+INCORRECT format (DO NOT DO THIS):
+```json
+{"ctq_scores": {"completeness": 4}}
+```
+
+Begin your response now with { character:"""
 
         return self._invoke_claude(prompt, system_prompt)
 
@@ -814,7 +938,24 @@ If the gap is about acceptance criteria, use Given-When-Then format.
 If the gap is about NFRs, provide specific metrics and SLAs.
 """
 
-            system_prompt = "You are an expert Business Analyst. Output only valid JSON, no markdown formatting."
+            system_prompt = """You are an expert Business Analyst.
+
+CRITICAL JSON FORMAT REQUIREMENTS:
+- Your response MUST be ONLY valid JSON
+- Start with { character and end with } character
+- NO markdown code blocks (no ``` or ```json)
+- NO explanatory text before or after the JSON
+- NO comments inside the JSON
+
+Correct format example:
+{"gap_id": "gap_1", "gap_description": "Missing data", "confidence": "high"}
+
+INCORRECT format (DO NOT DO THIS):
+```json
+{"gap_id": "gap_1"}
+```
+
+Begin your response now with { character:"""
 
             try:
                 fix = self._invoke_claude(prompt, system_prompt)

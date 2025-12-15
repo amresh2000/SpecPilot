@@ -723,17 +723,32 @@ Generate ALL files as complete, working code. No TODOs. No placeholders. Product
 CRITICAL JSON FORMAT REQUIREMENTS:
 - Your response MUST be ONLY valid JSON
 - Start with { character and end with } character
+- The VERY LAST character of your entire response MUST be the closing } of the JSON
 - NO markdown code blocks (no ``` or ```json)
 - NO explanatory text before or after the JSON
 - NO comments inside the JSON
+- NO notes, suggestions, or explanations after the JSON ends
+- This JSON will contain code snippets with braces - ensure NOTHING follows the final closing }
 
 Correct format example:
-{"code_skeleton": {"language": "java"}}
+{"code_skeleton": {"language": "java", "folders": []}}
 
 INCORRECT format (DO NOT DO THIS):
 ```json
 {"code_skeleton": {"language": "java"}}
 ```
+
+ALSO INCORRECT (DO NOT DO THIS):
+{"code_skeleton": {"language": "java"}}
+
+Note: This framework follows best practices.
+
+ALSO INCORRECT (DO NOT DO THIS):
+{"code_skeleton": {"language": "java"}}
+
+Additional context: {more info}
+
+REMINDER: The LAST character you write must be } with absolutely nothing after it.
 
 Begin your response now with { character:"""
 

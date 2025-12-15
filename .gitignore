@@ -15,6 +15,7 @@ build/
 # Backend
 backend/.env
 backend/generated/
+backend/logs/
 
 # Node / Frontend
 node_modules/

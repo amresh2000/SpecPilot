@@ -32,7 +32,11 @@ class Config:
     
     # Application Settings
     PORT = int(os.getenv("PORT", "8000"))
-    
+
+    # Logging Configuration
+    LOG_LLM_RESPONSES = os.getenv("LOG_LLM_RESPONSES", "false").lower() == "true"
+    LLM_LOG_DIR = os.getenv("LLM_LOG_DIR", "logs/llm_responses")
+
     @classmethod
     def validate(cls):
         """Validate required configuration"""

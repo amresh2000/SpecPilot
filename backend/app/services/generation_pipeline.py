@@ -54,7 +54,8 @@ class GenerationPipeline:
             result = self.llm_client.generate_epics_and_stories(
                 job.brd_data,
                 job.instructions,
-                self.gap_fixes
+                self.gap_fixes,
+                job_id=self.job_id
             )
 
             job.results.project_name = result.get('project_name', 'Untitled Project')
@@ -106,7 +107,8 @@ class GenerationPipeline:
                 job.results.user_stories,
                 job.instructions,
                 brd_chunks if brd_chunks else None,
-                self.gap_fixes
+                self.gap_fixes,
+                job_id=self.job_id
             )
 
             for test_data in result.get('functional_tests', []):
@@ -131,7 +133,8 @@ class GenerationPipeline:
             result = self.llm_client.generate_gherkin_tests(
                 job.results.user_stories,
                 job.results.functional_tests,
-                ""
+                "",
+                job_id=self.job_id
             )
 
             for scenario_data in result.get('gherkin_tests', []):
@@ -156,7 +159,8 @@ class GenerationPipeline:
             result = self.llm_client.generate_data_model(
                 job.brd_data,
                 job.results.user_stories,
-                self.gap_fixes
+                self.gap_fixes,
+                job_id=self.job_id
             )
 
             for entity_data in result.get('entities', []):
@@ -189,7 +193,8 @@ class GenerationPipeline:
             result = self.llm_client.generate_code_skeleton(
                 job.results.project_name,
                 job.results.entities,
-                gherkin_tests=job.results.gherkin_tests
+                gherkin_tests=job.results.gherkin_tests,
+                job_id=self.job_id
             )
 
             skeleton_data = result.get('code_skeleton', {})

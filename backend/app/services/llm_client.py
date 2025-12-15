@@ -6,6 +6,8 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 from typing import Dict, Any, List, Optional
+from pathlib import Path
+from datetime import datetime
 from app.models import (
     Epic, UserStory, AcceptanceCriterion, FunctionalTest,
     GherkinScenario, Entity, EntityField, CodeSkeleton, CodeFolder, CodeFile
@@ -53,8 +55,56 @@ class BedrockLLMClient:
         self.max_retries = 5  # Increased from 1 to 5
         self.base_delay = 2  # Base delay in seconds for exponential backoff
 
+    def _log_llm_error(
+        self,
+        job_id: str,
+        stage: str,
+        error_type: str,
+        prompt: str,
+        system_prompt: str,
+        raw_response: str,
+        error_message: str,
+        extraction_details: Optional[Dict[str, Any]] = None
+    ):
+        """Log LLM response errors to file for debugging"""
+        if not app_config.LOG_LLM_RESPONSES:
+            return
 
-    def _invoke_claude(self, prompt: str, system_prompt: str = "") -> Dict[str, Any]:
+        try:
+            # Create log directory structure
+            log_dir = Path(app_config.LLM_LOG_DIR) / job_id
+            log_dir.mkdir(parents=True, exist_ok=True)
+
+            # Create log filename with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_filename = f"{stage.lower()}_error_{timestamp}.json"
+            log_path = log_dir / log_filename
+
+            # Prepare log entry
+            log_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "job_id": job_id,
+                "stage": stage,
+                "model_id": self.model_id,
+                "error_type": error_type,
+                "extraction_details": extraction_details or {},
+                "prompt_preview": prompt[:1000] + ("..." if len(prompt) > 1000 else ""),
+                "system_prompt": system_prompt,
+                "raw_response": raw_response,
+                "error_message": error_message
+            }
+
+            # Write log file
+            with open(log_path, 'w', encoding='utf-8') as f:
+                json.dump(log_entry, f, indent=2, ensure_ascii=False)
+
+            print(f"LLM error logged to: {log_path}")
+
+        except Exception as e:
+            # Don't fail the main operation if logging fails
+            print(f"Failed to log LLM error: {str(e)}")
+
+    def _invoke_claude(self, prompt: str, system_prompt: str = "", job_id: str = None, stage: str = None) -> Dict[str, Any]:
         """Invoke Claude with exponential backoff retry logic for throttling"""
         last_error = None
 
@@ -90,22 +140,65 @@ class BedrockLLMClient:
                     # Try extracting from markdown code block
                     match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', content, re.DOTALL)
                     if match:
-                        print(f"WARNING: Claude returned markdown-wrapped JSON, extracting from code block...")
+                        error_msg = "WARNING: Claude returned markdown-wrapped JSON, extracting from code block..."
+                        print(error_msg)
+
+                        # Log the markdown wrapping issue
+                        if job_id and stage:
+                            self._log_llm_error(
+                                job_id=job_id,
+                                stage=stage,
+                                error_type="markdown_wrapped",
+                                prompt=prompt,
+                                system_prompt=system_prompt,
+                                raw_response=content,
+                                error_message=error_msg
+                            )
+
                         return json.loads(match.group(1).strip())
 
                     # Last resort: extract from first { to last }
                     start = content.find('{')
                     end = content.rfind('}')
                     if start != -1 and end > start:
-                        print(f"WARNING: Extracting JSON from mixed content (found {{ at {start}, }} at {end})...")
+                        error_msg = f"WARNING: Extracting JSON from mixed content (found {{ at {start}, }} at {end})..."
+                        print(error_msg)
+
+                        # Log the mixed content extraction issue
+                        if job_id and stage:
+                            self._log_llm_error(
+                                job_id=job_id,
+                                stage=stage,
+                                error_type="mixed_content_extraction",
+                                prompt=prompt,
+                                system_prompt=system_prompt,
+                                raw_response=content,
+                                error_message=error_msg,
+                                extraction_details={
+                                    "start_pos": start,
+                                    "end_pos": end,
+                                    "extraction_method": "rfind"
+                                }
+                            )
+
                         return json.loads(content[start:end+1])
 
                     # If all extraction failed, raise with helpful error
-                    raise json.JSONDecodeError(
-                        f"Could not extract JSON. Response preview: {content[:300]}...",
-                        content,
-                        0
-                    )
+                    error_msg = f"Could not extract JSON. Response preview: {content[:300]}..."
+
+                    # Log the complete failure
+                    if job_id and stage:
+                        self._log_llm_error(
+                            job_id=job_id,
+                            stage=stage,
+                            error_type="extraction_failed",
+                            prompt=prompt,
+                            system_prompt=system_prompt,
+                            raw_response=content,
+                            error_message=error_msg
+                        )
+
+                    raise json.JSONDecodeError(error_msg, content, 0)
 
             except json.JSONDecodeError as e:
                 # JSON parsing error - retry with exponential backoff
@@ -146,7 +239,8 @@ class BedrockLLMClient:
         brd_data: Dict[str, Any],
         instructions: str,
         gap_fixes: List[Dict[str, str]] = None,
-        existing_epics: List[Dict[str, str]] = None
+        existing_epics: List[Dict[str, str]] = None,
+        job_id: str = None
     ) -> Dict[str, Any]:
         """Call A: BRD → project_name + epics + user stories"""
 
@@ -258,14 +352,15 @@ INCORRECT format (DO NOT DO THIS):
 
 Begin your response now with { character:"""
 
-        return self._invoke_claude(prompt, system_prompt)
+        return self._invoke_claude(prompt, system_prompt, job_id=job_id, stage="EPICS")
 
     def generate_functional_tests(
         self,
         user_stories: List[UserStory],
         instructions: str,
         brd_chunks: Optional[List[Dict[str, Any]]] = None,
-        gap_fixes: List[Dict[str, str]] = None
+        gap_fixes: List[Dict[str, str]] = None,
+        job_id: str = None
     ) -> Dict[str, Any]:
         """Call B: User Stories → Functional Tests"""
 
@@ -338,13 +433,14 @@ INCORRECT format (DO NOT DO THIS):
 
 Begin your response now with { character:"""
 
-        return self._invoke_claude(prompt, system_prompt)
+        return self._invoke_claude(prompt, system_prompt, job_id=job_id, stage="FUNCTIONAL_TESTS")
 
     def generate_gherkin_tests(
         self,
         user_stories: List[UserStory],
         functional_tests: List[FunctionalTest] = None,
-        instructions: str = ""
+        instructions: str = "",
+        job_id: str = None
     ) -> Dict[str, Any]:
         """Call C: User Stories + Functional Tests → Gherkin scenarios"""
 
@@ -412,13 +508,14 @@ INCORRECT format (DO NOT DO THIS):
 
 Begin your response now with { character:"""
 
-        return self._invoke_claude(prompt, system_prompt)
+        return self._invoke_claude(prompt, system_prompt, job_id=job_id, stage="GHERKIN_TESTS")
 
     def generate_data_model(
         self,
         brd_data: Dict[str, Any],
         user_stories: List[UserStory],
-        gap_fixes: List[Dict[str, str]] = None
+        gap_fixes: List[Dict[str, str]] = None,
+        job_id: str = None
     ) -> Dict[str, Any]:
         """Call D: BRD + stories → Entities + Mermaid"""
 
@@ -485,13 +582,14 @@ INCORRECT format (DO NOT DO THIS):
 
 Begin your response now with { character:"""
 
-        return self._invoke_claude(prompt, system_prompt)
+        return self._invoke_claude(prompt, system_prompt, job_id=job_id, stage="DATA_MODEL")
 
     def generate_code_skeleton(
         self,
         project_name: str,
         entities: List[Entity],
-        gherkin_tests: List[GherkinScenario] = None
+        gherkin_tests: List[GherkinScenario] = None,
+        job_id: str = None
     ) -> Dict[str, Any]:
         """Generate Java Selenium + Cucumber test automation framework based on Gherkin tests and entities"""
 
@@ -752,11 +850,12 @@ REMINDER: The LAST character you write must be } with absolutely nothing after i
 
 Begin your response now with { character:"""
 
-        return self._invoke_claude(prompt, system_prompt)
+        return self._invoke_claude(prompt, system_prompt, job_id=job_id, stage="CODE_GENERATION")
 
     def validate_brd_quality(
         self,
-        brd_data: Dict[str, Any]
+        brd_data: Dict[str, Any],
+        job_id: str = None
     ) -> Dict[str, Any]:
         """Call F: BRD → 10 CTQ Validation Scores"""
 
@@ -905,12 +1004,13 @@ INCORRECT format (DO NOT DO THIS):
 
 Begin your response now with { character:"""
 
-        return self._invoke_claude(prompt, system_prompt)
+        return self._invoke_claude(prompt, system_prompt, job_id=job_id, stage="VALIDATION")
 
     def generate_gap_fixes(
         self,
         brd_data: Dict[str, Any],
-        validation_report: Dict[str, Any]
+        validation_report: Dict[str, Any],
+        job_id: str = None
     ) -> List[Dict[str, Any]]:
         """Call G: Validation Gaps → AI-Suggested Fixes"""
 
@@ -973,7 +1073,7 @@ INCORRECT format (DO NOT DO THIS):
 Begin your response now with { character:"""
 
             try:
-                fix = self._invoke_claude(prompt, system_prompt)
+                fix = self._invoke_claude(prompt, system_prompt, job_id=job_id, stage="GAP_FIXES")
                 gap_fixes.append(fix)
             except Exception as e:
                 print(f"Error generating fix for gap '{gap}': {str(e)}")

@@ -255,14 +255,14 @@ async def validate_brd(
 
         # Run validation
         llm_client = BedrockLLMClient()
-        validation_result = llm_client.validate_brd_quality(brd_data)
+        validation_result = llm_client.validate_brd_quality(brd_data, job_id=job_id)
 
         # Store validation report
         validation_report = ValidationReport(**validation_result)
         job.results.validation_report = validation_report
 
         # Generate gap fixes
-        gap_fixes_data = llm_client.generate_gap_fixes(brd_data, validation_result)
+        gap_fixes_data = llm_client.generate_gap_fixes(brd_data, validation_result, job_id=job_id)
 
         # Store gap fixes with unique IDs
         for idx, fix_data in enumerate(gap_fixes_data):

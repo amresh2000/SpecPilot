@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict
 from enum import Enum
 from datetime import datetime
 
@@ -23,7 +23,6 @@ class ArtefactsConfig(BaseModel):
     functional_tests: bool = True
     gherkin_tests: bool = True
     data_model: bool = True
-    code_skeleton: bool = True
 
 
 class GenerateRequest(BaseModel):
@@ -105,26 +104,6 @@ class Entity(BaseModel):
     source_story_ids: Optional[List[str]] = []
 
 
-class CodeFile(BaseModel):
-    name: str
-    content: str
-
-
-class CodeFolder(BaseModel):
-    path: str
-    files: List[CodeFile]
-
-
-class CodeSkeleton(BaseModel):
-    language: str = "java"
-    framework: str = "selenium-cucumber"
-    build_tool: str = "maven"
-    test_framework: str = "junit5"
-    base_package: str = "com.cacib.project"
-    root_folder: str
-    folders: List[CodeFolder]
-
-
 # Validation Models
 class CTQScore(BaseModel):
     score: int  # 0-5
@@ -161,8 +140,6 @@ class GenerationResults(BaseModel):
     gherkin_tests: List[GherkinScenario] = []
     entities: List[Entity] = []
     mermaid: Optional[str] = None
-    code_tree: List[Dict[str, Any]] = []
-    code_skeleton: Optional[CodeSkeleton] = None
     validation_report: Optional[ValidationReport] = None
     gap_fixes: List[GapFix] = Field(default_factory=list)
 
@@ -173,7 +150,6 @@ class PipelineStage(str, Enum):
     FUNCTIONAL_TESTS = "functional_tests"
     GHERKIN_TESTS = "gherkin_tests"
     DATA_MODEL = "data_model"
-    CODE_GENERATION = "code_generation"
     COMPLETED = "completed"
 
 

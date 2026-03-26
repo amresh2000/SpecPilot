@@ -7,7 +7,6 @@ export type PipelineStage =
   | 'functional_tests'
   | 'gherkin_tests'
   | 'data_model'
-  | 'code_generation'
   | 'completed';
 
 export interface StageState {
@@ -28,7 +27,6 @@ export interface ArtefactsConfig {
   functional_tests: boolean;
   gherkin_tests: boolean;
   data_model: boolean;
-  code_skeleton: boolean;
 }
 
 export interface GenerateRequest {
@@ -102,14 +100,6 @@ export interface Entity {
   fields: EntityField[];
 }
 
-export interface CodeTreeNode {
-  name: string;
-  type: 'file' | 'folder';
-  path?: string;
-  content?: string;
-  children?: CodeTreeNode[];
-}
-
 export interface GenerationResults {
   project_name?: string;
   epics: Epic[];
@@ -118,7 +108,6 @@ export interface GenerationResults {
   gherkin_tests: GherkinScenario[];
   entities: Entity[];
   mermaid?: string;
-  code_tree: CodeTreeNode[];
 }
 
 export interface StatusResponse {

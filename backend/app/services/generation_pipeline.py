@@ -5,7 +5,7 @@ from app.services.brd_parser import BRDParser
 from app.services.llm_client import BedrockLLMClient
 from app.models import (
     JobStatus, StepStatus, Epic, UserStory, AcceptanceCriterion,
-    FunctionalTest, GherkinScenario, Entity, EntityField, CodeSkeleton
+    FunctionalTest, GherkinScenario, Entity, EntityField
 )
 from app.utils import log_info, log_error, extract_applied_gap_fixes
 
@@ -182,60 +182,3 @@ class GenerationPipeline:
             job.update_step("Generating Data Model", StepStatus.FAILED)
             raise RuntimeError(f"Failed to generate data model: {str(e)}")
 
-    async def _generate_code_skeleton(self):
-        """Generate Java Selenium + Cucumber test automation framework"""
-        job = job_manager.get_job(self.job_id)
-        start_time = time.time()
-
-        try:
-            job.update_step("Generating Code Skeleton", StepStatus.RUNNING)
-
-            result = self.llm_client.generate_code_skeleton(
-                job.results.project_name,
-                job.results.entities,
-                gherkin_tests=job.results.gherkin_tests,
-                job_id=self.job_id
-            )
-
-            skeleton_data = result.get('code_skeleton', {})
-            job.results.code_skeleton = CodeSkeleton(**skeleton_data)
-            job.results.code_tree = self._build_tree_view(job.results.code_skeleton)
-
-            duration_ms = int((time.time() - start_time) * 1000)
-            job.update_step("Generating Code Skeleton", StepStatus.COMPLETED, duration_ms)
-
-        except Exception as e:
-            job.update_step("Generating Code Skeleton", StepStatus.FAILED)
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Failed to generate code skeleton: {str(e)}", exc_info=True)
-            raise
-
-    def _build_tree_view(self, skeleton: CodeSkeleton) -> list:
-        """Build a tree structure for frontend display"""
-        tree = []
-
-        for folder in skeleton.folders:
-            parts = folder.path.split('/')
-
-            current = tree
-            for part in parts:
-                node = next((n for n in current if n.get('name') == part and n.get('type') == 'folder'), None)
-                if not node:
-                    node = {
-                        'name': part,
-                        'type': 'folder',
-                        'children': []
-                    }
-                    current.append(node)
-                current = node['children']
-
-            for file in folder.files:
-                current.append({
-                    'name': file.name,
-                    'type': 'file',
-                    'path': f"{folder.path}/{file.name}",
-                    'content': file.content
-                })
-
-        return tree

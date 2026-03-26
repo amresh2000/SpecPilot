@@ -55,7 +55,6 @@ export const ConfigurationPage: React.FC = () => {
           functional_tests: true,
           gherkin_tests: true,
           data_model: true,
-          code_skeleton: true,
         }
       });
 

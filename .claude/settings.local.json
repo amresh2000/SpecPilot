@@ -16,7 +16,8 @@
       "Bash(grep:*)",
       "Bash(tree:*)",
       "Bash(wc:*)",
-      "Bash(source:*)"
+      "Bash(source:*)",
+      "Bash(git checkout:*)"
     ],
     "deny": [],
     "ask": []

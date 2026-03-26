@@ -108,20 +108,6 @@ async def download_results(job_id: str):
                 with open(temp_path / "diagram.mmd", 'w') as f:
                     f.write(job.results.mermaid)
 
-            # Write code skeleton
-            if job.results.code_skeleton:
-                skeleton_dir = temp_path / "code_skeleton"
-                skeleton_dir.mkdir(exist_ok=True)
-
-                for folder in job.results.code_skeleton.folders:
-                    folder_path = skeleton_dir / folder.path
-                    folder_path.mkdir(parents=True, exist_ok=True)
-
-                    for file in folder.files:
-                        file_path = folder_path / file.name
-                        with open(file_path, 'w') as f:
-                            f.write(file.content)
-
             # Create ZIP
             shutil.make_archive(str(zip_path.with_suffix('')), 'zip', temp_dir)
 

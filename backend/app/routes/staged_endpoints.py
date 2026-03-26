@@ -62,8 +62,6 @@ async def proceed_to_stage(job_id: str, request: ProceedToStageRequest, backgrou
                     await pipeline._generate_gherkin_tests()
                 elif stage == PipelineStage.DATA_MODEL:
                     await pipeline._generate_data_model()
-                elif stage == PipelineStage.CODE_GENERATION:
-                    await pipeline._generate_code_skeleton()
 
                 job.complete_current_stage()
 

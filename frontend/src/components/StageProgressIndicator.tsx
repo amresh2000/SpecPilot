@@ -13,7 +13,6 @@ const stageConfig = [
   { id: 'functional_tests' as PipelineStage, label: 'Functional Tests' },
   { id: 'gherkin_tests' as PipelineStage, label: 'Gherkin Tests' },
   { id: 'data_model' as PipelineStage, label: 'Data Model' },
-  { id: 'code_generation' as PipelineStage, label: 'Code' },
   { id: 'completed' as PipelineStage, label: 'Completed' },
 ];
 

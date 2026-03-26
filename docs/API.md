@@ -20,7 +20,7 @@ Check if the API is running.
 
 ---
 
-### 2. Validate BRD (Step 1)
+### 2. Validate BRD (Stage 1)
 ```
 POST /api/validate-brd
 ```
@@ -36,8 +36,7 @@ Upload BRD and run quality validation **without** starting generation.
       "epics_and_stories": true,
       "data_model": true,
       "functional_tests": true,
-      "gherkin_tests": true,
-      "code_skeleton": true
+      "gherkin_tests": true
     }
   }
   ```
@@ -87,7 +86,7 @@ POST /api/update-gap-fix/{job_id}
 ```
 User accepts, edits, or rejects an AI-suggested fix.
 
-**Request** (form-data):
+**Request** (JSON):
 - `gap_id`: Gap identifier (e.g., "gap_1")
 - `action`: One of: `"accepted"`, `"edited"`, `"rejected"`
 - `final_text`: (Optional) Edited text if action is "edited"
@@ -103,20 +102,24 @@ User accepts, edits, or rejects an AI-suggested fix.
 
 ---
 
-### 4. Proceed to Stage (Staged Pipeline)
+### 4. Proceed to Stage
 ```
 POST /api/proceed-to-stage/{job_id}
 ```
 Progress to the next pipeline stage after user approval.
 
-**Request** (form-data):
-- `next_stage`: One of: `"EPICS"`, `"FUNCTIONAL_TESTS"`, `"GHERKIN_TESTS"`, `"DATA_MODEL"`, `"CODE_GENERATION"`
+**Request** (JSON):
+```json
+{
+  "next_stage": "epics" | "functional_tests" | "gherkin_tests" | "data_model"
+}
+```
 
 **Response**:
 ```json
 {
   "job_id": "unique-job-id",
-  "stage": "EPICS",
+  "stage": "epics",
   "status": "started" | "already_completed"
 }
 ```
@@ -134,9 +137,9 @@ Generate additional artifacts at the current stage based on user instructions.
 **Request** (JSON):
 ```json
 {
-  "stage": "EPICS" | "FUNCTIONAL_TESTS" | "GHERKIN_TESTS",
+  "stage": "epics" | "functional_tests" | "gherkin_tests",
   "instructions": "Generate additional test scenarios for checkout flow",
-  "context_ids": ["story_1", "story_2"]  // Optional: filter to specific stories
+  "context_ids": ["story_1", "story_2"]
 }
 ```
 
@@ -144,15 +147,15 @@ Generate additional artifacts at the current stage based on user instructions.
 ```json
 {
   "job_id": "unique-job-id",
-  "stage": "FUNCTIONAL_TESTS",
+  "stage": "functional_tests",
   "status": "generating"
 }
 ```
 
 **Supported Stages**:
-- `EPICS`: Generate more epics and user stories
-- `FUNCTIONAL_TESTS`: Generate more functional tests (optionally filtered by story IDs)
-- `GHERKIN_TESTS`: Generate more Gherkin scenarios (optionally filtered by story IDs)
+- `epics`: Generate more epics and user stories
+- `functional_tests`: Generate more functional tests (optionally filtered by story IDs)
+- `gherkin_tests`: Generate more Gherkin scenarios (optionally filtered by story IDs)
 
 ---
 
@@ -165,13 +168,13 @@ Poll for generation progress and results.
 **Response**:
 ```json
 {
-  "status": "in_progress" | "completed" | "failed",
+  "status": "running" | "completed" | "failed",
   "error": null,
   "steps": [
     {
       "name": "Generating EPICs & User Stories",
-      "status": "in_progress" | "completed" | "failed",
-      "error": null
+      "status": "running" | "completed" | "failed",
+      "duration_ms": 12400
     }
   ],
   "results": {
@@ -183,15 +186,13 @@ Poll for generation progress and results.
     "entities": [ /* Entity objects */ ],
     "mermaid": "erDiagram...",
     "functional_tests": [ /* Test objects */ ],
-    "gherkin_tests": [ /* Gherkin scenario objects */ ],
-    "code_skeleton": { /* Code structure */ }
+    "gherkin_tests": [ /* Gherkin scenario objects */ ]
   },
   "artefacts": {
     "epics_and_stories": true,
     "data_model": true,
     "functional_tests": true,
-    "gherkin_tests": true,
-    "code_skeleton": true
+    "gherkin_tests": true
   }
 }
 ```
@@ -210,20 +211,17 @@ Download all generated artifacts as a ZIP file.
 - `gherkin_tests.feature`
 - `entities.json`
 - `diagram.mmd`
-- `code_skeleton/` (folder with generated code)
 
 ---
 
 ### 8. Update Epic
 ```
-PUT /api/epics/{epic_id}
+PUT /api/update-epic/{job_id}/{epic_id}
 ```
-Update an epic's properties.
 
 **Request** (JSON):
 ```json
 {
-  "job_id": "unique-job-id",
   "name": "Updated Epic Name",
   "description": "Updated description"
 }
@@ -239,22 +237,16 @@ Update an epic's properties.
 
 ---
 
-### 9. Delete Epic (Cascade)
+### 9. Delete Epic
 ```
-DELETE /api/epics/{epic_id}?job_id={job_id}
+DELETE /api/delete-epic/{job_id}/{epic_id}
 ```
-Delete an epic and all associated user stories and tests.
 
 **Response**:
 ```json
 {
   "epic_id": "epic_1",
-  "deleted": true,
-  "cascade_deleted": {
-    "user_stories": 5,
-    "functional_tests": 12,
-    "gherkin_tests": 8
-  }
+  "deleted": true
 }
 ```
 
@@ -262,14 +254,12 @@ Delete an epic and all associated user stories and tests.
 
 ### 10. Update User Story
 ```
-PUT /api/stories/{story_id}
+PUT /api/update-story/{job_id}/{story_id}
 ```
-Update a user story's properties.
 
 **Request** (JSON):
 ```json
 {
-  "job_id": "unique-job-id",
   "title": "Updated title",
   "role": "Updated role",
   "goal": "Updated goal",
@@ -279,36 +269,21 @@ Update a user story's properties.
 
 ---
 
-### 11. Delete User Story (Cascade)
+### 11. Delete User Story
 ```
-DELETE /api/stories/{story_id}?job_id={job_id}
-```
-Delete a user story and all associated tests.
-
-**Response**:
-```json
-{
-  "story_id": "story_1",
-  "deleted": true,
-  "cascade_deleted": {
-    "functional_tests": 3,
-    "gherkin_tests": 2
-  }
-}
+DELETE /api/delete-story/{job_id}/{story_id}
 ```
 
 ---
 
 ### 12. Update Functional Test
 ```
-PUT /api/tests/{test_id}
+PUT /api/update-functional-test/{job_id}/{test_id}
 ```
-Update a functional test's properties.
 
 **Request** (JSON):
 ```json
 {
-  "job_id": "unique-job-id",
   "title": "Updated test title",
   "objective": "Updated objective",
   "preconditions": ["Updated precondition"],
@@ -319,36 +294,34 @@ Update a functional test's properties.
 
 ---
 
-### 13. Delete Functional Test
+### 13. Delete Test
 ```
-DELETE /api/tests/{test_id}?job_id={job_id}
+DELETE /api/delete-test/{job_id}/{test_id}
+```
+
+**Request** (JSON):
+```json
+{
+  "test_type": "functional" | "gherkin"
+}
 ```
 
 ---
 
 ### 14. Update Gherkin Scenario
 ```
-PUT /api/gherkin/{scenario_id}
+PUT /api/update-gherkin-test/{job_id}/{test_id}
 ```
-Update a Gherkin scenario's properties.
 
 **Request** (JSON):
 ```json
 {
-  "job_id": "unique-job-id",
   "feature_name": "Updated feature",
   "scenario_name": "Updated scenario",
   "given": ["Given step 1"],
   "when": ["When step 1"],
   "then": ["Then step 1"]
 }
-```
-
----
-
-### 15. Delete Gherkin Scenario
-```
-DELETE /api/gherkin/{scenario_id}?job_id={job_id}
 ```
 
 ---
@@ -374,7 +347,7 @@ DELETE /api/gherkin/{scenario_id}?job_id={job_id}
   goal: string;
   benefit: string;
   acceptance_criteria: AcceptanceCriterion[];
-  source_chunks: string[];
+  source_chunks?: string[];
 }
 ```
 
@@ -388,7 +361,7 @@ DELETE /api/gherkin/{scenario_id}?job_id={job_id}
   preconditions: string[];
   test_steps: string[];
   expected_results: string[];
-  source_chunks: string[];
+  source_chunks?: string[];
 }
 ```
 
@@ -402,7 +375,7 @@ DELETE /api/gherkin/{scenario_id}?job_id={job_id}
   given: string[];
   when: string[];
   then: string[];
-  source_chunks: string[];
+  source_chunks?: string[];
 }
 ```
 
@@ -446,84 +419,75 @@ All endpoints may return these error responses:
 
 ## Workflow
 
-### Staged Pipeline Workflow (Current Implementation)
+### Staged Pipeline (6 Stages)
 
 **Stage 1: Validation**
 ```
 POST /api/validate-brd
 → Upload BRD, receive validation report and gap fixes
 
-POST /api/update-gap-fix/{job_id} (for each gap)
+POST /api/update-gap-fix/{job_id}  (for each gap)
 → Accept, edit, or reject AI suggestions
 ```
 
 **Stage 2: EPICs & User Stories**
 ```
-POST /api/proceed-to-stage/{job_id} with next_stage="EPICS"
+POST /api/proceed-to-stage/{job_id}  { "next_stage": "epics" }
 → Generate epics and user stories
 
 GET /api/status/{job_id}
 → Poll until stage completes
 
-PUT /api/epics/{epic_id}, DELETE /api/epics/{epic_id}
-→ Edit or delete generated epics
+PUT /api/update-epic/{job_id}/{epic_id}
+DELETE /api/delete-epic/{job_id}/{epic_id}
 
-PUT /api/stories/{story_id}, DELETE /api/stories/{story_id}
-→ Edit or delete generated stories
+PUT /api/update-story/{job_id}/{story_id}
+DELETE /api/delete-story/{job_id}/{story_id}
 
-POST /api/generate-more/{job_id} with stage="EPICS"
+POST /api/generate-more/{job_id}  { "stage": "epics", ... }
 → Generate additional epics/stories (optional)
 ```
 
 **Stage 3: Functional Tests**
 ```
-POST /api/proceed-to-stage/{job_id} with next_stage="FUNCTIONAL_TESTS"
+POST /api/proceed-to-stage/{job_id}  { "next_stage": "functional_tests" }
 → Generate functional tests from stories
 
 GET /api/status/{job_id}
 → Poll until stage completes
 
-PUT /api/tests/{test_id}, DELETE /api/tests/{test_id}
-→ Edit or delete tests
+PUT /api/update-functional-test/{job_id}/{test_id}
+DELETE /api/delete-test/{job_id}/{test_id}  { "test_type": "functional" }
 
-POST /api/generate-more/{job_id} with stage="FUNCTIONAL_TESTS"
-→ Generate more tests (with optional context_ids filtering)
+POST /api/generate-more/{job_id}  { "stage": "functional_tests", "context_ids": [...] }
+→ Generate more tests (with optional story ID filtering)
 ```
 
 **Stage 4: Gherkin Tests**
 ```
-POST /api/proceed-to-stage/{job_id} with next_stage="GHERKIN_TESTS"
+POST /api/proceed-to-stage/{job_id}  { "next_stage": "gherkin_tests" }
 → Generate Gherkin BDD scenarios
 
 GET /api/status/{job_id}
 → Poll until stage completes
 
-PUT /api/gherkin/{scenario_id}, DELETE /api/gherkin/{scenario_id}
-→ Edit or delete scenarios
+PUT /api/update-gherkin-test/{job_id}/{test_id}
+DELETE /api/delete-test/{job_id}/{test_id}  { "test_type": "gherkin" }
 
-POST /api/generate-more/{job_id} with stage="GHERKIN_TESTS"
-→ Generate more scenarios (with optional context_ids filtering)
+POST /api/generate-more/{job_id}  { "stage": "gherkin_tests", "context_ids": [...] }
+→ Generate more scenarios (with optional story ID filtering)
 ```
 
 **Stage 5: Data Model**
 ```
-POST /api/proceed-to-stage/{job_id} with next_stage="DATA_MODEL"
+POST /api/proceed-to-stage/{job_id}  { "next_stage": "data_model" }
 → Generate entity-relationship model and Mermaid diagram
 
 GET /api/status/{job_id}
 → Poll until stage completes
 ```
 
-**Stage 6: Code Generation**
-```
-POST /api/proceed-to-stage/{job_id} with next_stage="CODE_GENERATION"
-→ Generate Java Selenium + Cucumber test automation framework
-
-GET /api/status/{job_id}
-→ Poll until stage completes
-```
-
-**Stage 7: Download**
+**Stage 6: Download**
 ```
 GET /api/download/{job_id}
 → Download all artifacts as ZIP file
@@ -532,7 +496,7 @@ GET /api/download/{job_id}
 ### Stage Progression Rules
 
 - User must explicitly proceed to each stage (no auto-advancement)
-- Previously completed stages are skipped if revisited (status: "already_completed")
+- Previously completed stages are skipped if revisited (status: `"already_completed"`)
 - Stage history tracks completion timestamps
 - Edit/delete operations available at EPICS, FUNCTIONAL_TESTS, GHERKIN_TESTS stages
 - Generate-more operations available at EPICS, FUNCTIONAL_TESTS, GHERKIN_TESTS stages
@@ -553,3 +517,4 @@ AWS Bedrock API calls use exponential backoff retry logic:
 Allowed origins in development:
 - `http://localhost:5173`
 - `http://localhost:5174`
+- `http://localhost:5175`

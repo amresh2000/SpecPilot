@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Loader2, Download, CheckCircle2, Home, FileText, TestTube, Database, Code } from 'lucide-react';
+import { Loader2, Download, CheckCircle2, Home, FileText, TestTube, Database } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { StageProgressIndicator } from '@/components/StageProgressIndicator';
@@ -60,21 +60,6 @@ export const SummaryPage: React.FC = () => {
 
   const { results } = status;
 
-  // Count code files
-  const countCodeFiles = (nodes: any[]): number => {
-    let count = 0;
-    for (const node of nodes) {
-      if (node.type === 'file') {
-        count++;
-      } else if (node.type === 'folder' && node.children) {
-        count += countCodeFiles(node.children);
-      }
-    }
-    return count;
-  };
-
-  const codeFilesCount = results.code_tree ? countCodeFiles(results.code_tree) : 0;
-
   const metrics = [
     {
       label: 'EPICs',
@@ -110,13 +95,6 @@ export const SummaryPage: React.FC = () => {
       icon: Database,
       color: 'pink',
       description: 'Data model entities'
-    },
-    {
-      label: 'Code Files',
-      count: codeFilesCount,
-      icon: Code,
-      color: 'indigo',
-      description: 'Generated Java files'
     }
   ];
 
@@ -201,10 +179,6 @@ export const SummaryPage: React.FC = () => {
               <div>
                 <p className="text-sm font-medium text-gray-600 mb-1">Job ID</p>
                 <p className="text-lg font-mono text-gray-700">{jobId}</p>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-gray-600 mb-1">Framework</p>
-                <p className="text-lg text-gray-900">Java Selenium + Cucumber</p>
               </div>
               <div>
                 <p className="text-sm font-medium text-gray-600 mb-1">Status</p>

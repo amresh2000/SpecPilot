@@ -2,7 +2,7 @@
 
 ## System Overview
 
-SpecPilot is a two-tier web application with a staged pipeline architecture that transforms Business Requirements Documents (BRDs) into technical artifacts using AWS Bedrock (Claude 3.5 Sonnet v2). The system follows a user-approved progression through 7 stages, from quality validation to final code generation.
+SpecPilot is a two-tier web application with a staged pipeline architecture that transforms Business Requirements Documents (BRDs) into technical artifacts using AWS Bedrock (Claude Sonnet 4.5). The system follows a user-approved progression through 6 stages, from quality validation to data model generation.
 
 ### Architecture Diagram
 
@@ -21,7 +21,7 @@ SpecPilot is a two-tier web application with a staged pipeline architecture that
 │  │              API Layer (routes/)                      │  │
 │  │  - /validate-brd (Stage 1)                            │  │
 │  │  - /update-gap-fix (Gap fix review)                   │  │
-│  │  - /proceed-to-stage/{job_id} (Stages 2-7)            │  │
+│  │  - /proceed-to-stage/{job_id} (Stages 2-5)            │  │
 │  │  - /generate-more (Additional artifacts)              │  │
 │  │  - CRUD endpoints (edit/delete artifacts)             │  │
 │  │  - /status, /download                                 │  │
@@ -38,10 +38,10 @@ SpecPilot is a two-tier web application with a staged pipeline architecture that
                         │ Boto3 SDK
                         ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                   AWS Bedrock (Claude 3.5 Sonnet v2)         │
+│                   AWS Bedrock (Claude Sonnet 4.5)            │
 │  - BRD Quality Validation (10 CTQ dimensions)                │
 │  - Gap Fix Generation                                        │
-│  - Artifact Generation (Epics, Stories, Tests, Code)         │
+│  - Artifact Generation (Epics, Stories, Tests, Data Model)   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -58,15 +58,14 @@ SpecPilot is a two-tier web application with a staged pipeline architecture that
 - Lucide React (icons)
 - React Router (navigation)
 
-**Key Components** (8-stage workflow):
+**Key Components** (7-stage workflow):
 - `ConfigurationPage.tsx`: BRD upload and instructions (Stage 1)
 - `ValidationPage.tsx`: Quality validation review with gap fixes (Stage 2)
 - `EpicsRefinementPage.tsx`: EPICs & User Stories editing (Stage 3)
 - `FunctionalTestsRefinementPage.tsx`: Functional test case editing (Stage 4)
 - `GherkinTestsRefinementPage.tsx`: Gherkin BDD scenario editing (Stage 5)
 - `DataModelPage.tsx`: Entity-relationship model visualization (Stage 6)
-- `CodeSkeletonPage.tsx`: Java Selenium + Cucumber code preview (Stage 7)
-- `SummaryPage.tsx`: Final download and completion (Stage 8)
+- `SummaryPage.tsx`: Final download and completion (Stage 7)
 
 **State Management**:
 - Local component state with React hooks
@@ -90,17 +89,20 @@ SpecPilot is a two-tier web application with a staged pipeline architecture that
 backend/
 ├── app/
 │   ├── main.py                    # FastAPI application entry
-│   ├── models.py                  # Pydantic data models
+│   ├── config.py                  # Configuration management
+│   ├── models/
+│   │   └── schemas.py             # Pydantic data models
 │   ├── routes/
-│   │   ├── validation_endpoints.py    # Validation API
-│   │   ├── staged_endpoints.py        # Staged pipeline API
-│   │   └── crud_endpoints.py          # Edit/delete operations
+│   │   ├── shared_endpoints.py    # CRUD, status, download endpoints
+│   │   └── staged_endpoints.py    # Stage progression endpoints
 │   ├── services/
-│   │   ├── brd_parser.py              # Document parsing logic
-│   │   ├── generation_pipeline.py     # Stage orchestration
-│   │   ├── llm_client.py              # AWS Bedrock integration
-│   │   └── job_manager.py             # In-memory job state
-│   └── utils.py                   # Logging and utility functions
+│   │   ├── brd_parser.py          # Document parsing logic
+│   │   ├── generation_pipeline.py # Stage orchestration
+│   │   ├── llm_client.py          # AWS Bedrock integration
+│   │   └── job_manager.py         # In-memory job state
+│   └── utils/
+│       ├── gap_fix_utils.py       # Gap fix utilities
+│       └── logger.py              # Logging utilities
 ├── generated/                     # Output directory for artifacts
 └── venv/                          # Python virtual environment
 ```
@@ -116,7 +118,7 @@ Parses BRD documents into structured chunks for LLM processing.
 **Capabilities**:
 - `.docx` parsing with python-docx
 - `.txt` file parsing
-- Section extraction
+- Section extraction with hierarchical IDs
 - Table detection and parsing
 - Chunk generation with metadata
 
@@ -125,7 +127,6 @@ Parses BRD documents into structured chunks for LLM processing.
 {
     "filename": str,
     "file_type": str,
-    "num_pages": int,
     "sections": [
         {
             "id": str,
@@ -156,13 +157,12 @@ Parses BRD documents into structured chunks for LLM processing.
 
 ### 2. BedrockLLMClient (`llm_client.py`)
 
-Handles all AWS Bedrock API interactions with Claude 3.5 Sonnet v2.
+Handles all AWS Bedrock API interactions with Claude Sonnet 4.5.
 
 **Model Configuration**:
-- Model ID: `us.anthropic.claude-3-5-sonnet-20241022-v2:0`
-- Max tokens: 4096
-- Temperature: 0.7
-- Region: us-east-1
+- Model ID: `us.anthropic.claude-sonnet-4-5-20250929-v1:0` (cross-region inference profile)
+- Configurable via `AWS_BEDROCK_MODEL_ID` env var
+- Region: `AWS_DEFAULT_REGION` (default: us-east-1)
 
 **Retry Logic**:
 - Exponential backoff for throttling (2s → 4s → 8s → 16s → 32s)
@@ -176,7 +176,6 @@ Handles all AWS Bedrock API interactions with Claude 3.5 Sonnet v2.
 4. `generate_functional_tests()`: Functional test case generation from stories
 5. `generate_gherkin_tests()`: BDD Gherkin scenarios from functional tests
 6. `generate_data_model()`: Entity-relationship model + Mermaid diagram
-7. `generate_code_skeleton()`: Java Selenium + Cucumber test automation framework
 
 ---
 
@@ -190,7 +189,6 @@ Stage-by-stage generation orchestrator called by staged_endpoints.py.
 3. `_generate_functional_tests()`: Generate functional test cases from stories
 4. `_generate_gherkin_tests()`: Generate Gherkin BDD scenarios from functional tests
 5. `_generate_data_model()`: Generate entities and Mermaid ER diagram
-6. `_generate_code_skeleton()`: Generate Java Selenium + Cucumber framework with POM
 
 **Stage History Tracking**:
 - Maintains stage history with completion timestamps
@@ -233,7 +231,7 @@ class StageHistoryEntry:
 
 ## Data Flow
 
-### Staged Pipeline Workflow (7 Stages with Human-in-the-Loop)
+### Staged Pipeline Workflow (6 Stages with Human-in-the-Loop)
 
 ```
 Stage 1: BRD Upload and Validation
@@ -291,21 +289,14 @@ Stage 5: Data Model
    ↓
 25. GenerationPipeline._generate_data_model() → Background task
    ↓
-26. Frontend displays DataModelPage with Mermaid diagram
+26. Frontend displays DataModelPage with entities and Mermaid diagram
 
-Stage 6: Code Generation
-27. POST /api/proceed-to-stage/{job_id} with stage=CODE_GENERATION
+Stage 6: Summary and Download
+27. User clicks "Continue to Summary"
    ↓
-28. GenerationPipeline._generate_code_skeleton() → Background task
+28. Frontend displays SummaryPage
    ↓
-29. Frontend displays CodeSkeletonPage with file tree
-
-Stage 7: Summary and Download
-30. User clicks "Proceed to Summary"
-   ↓
-31. Frontend displays SummaryPage
-   ↓
-32. GET /api/download/{job_id} → ZIP file with all artifacts
+29. GET /api/download/{job_id} → ZIP file with all artifacts
 ```
 
 **Key Features**:
@@ -371,7 +362,7 @@ Stage 7: Summary and Download
 - Each step independent and self-contained
 
 ### 3. Strategy Pattern
-- Multiple LLM generation strategies (epics, tests, code)
+- Multiple LLM generation strategies (epics, tests, data model)
 - Configurable artifact generation
 
 ### 4. Retry Pattern
@@ -385,7 +376,7 @@ Stage 7: Summary and Download
 ### Current Implementation
 - No authentication/authorization
 - Local development only (CORS restricted)
-- AWS credentials from environment/boto3 defaults
+- AWS credentials from environment variables
 
 ### Production Requirements
 - Add JWT authentication
@@ -431,7 +422,7 @@ Stage 7: Summary and Download
 
 ### Why AWS Bedrock?
 - Managed LLM service (no infrastructure)
-- Claude 3.5 Sonnet v2 for quality
+- Claude Sonnet 4.5 for quality
 - Pay-per-use pricing
 - Enterprise-grade security and compliance
 

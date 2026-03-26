@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Loader2, CheckCircle, ArrowLeft } from 'lucide-react';
+import { Loader2, ArrowLeft, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { StageProgressIndicator } from '@/components/StageProgressIndicator';
@@ -15,7 +15,6 @@ export const DataModelPage: React.FC = () => {
 
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isGeneratingCode, setIsGeneratingCode] = useState(false);
 
   useEffect(() => {
     fetchStatus();
@@ -33,47 +32,6 @@ export const DataModelPage: React.FC = () => {
     } catch (error) {
       console.error('Failed to fetch status:', error);
       setIsLoading(false);
-    }
-  };
-
-  const handleGenerateCode = async () => {
-    if (!jobId) return;
-
-    setIsGeneratingCode(true);
-    try {
-      const response = await api.proceedToStage(jobId, 'code_generation');
-
-      // Check if already completed
-      if (response.status === 'already_completed') {
-        toast.info('Code skeleton already generated');
-        setIsGeneratingCode(false);
-        navigate(`/code/${jobId}`);
-        return;
-      }
-
-      toast.success('Starting code skeleton generation...');
-
-      // Poll for completion
-      const pollInterval = setInterval(async () => {
-        const data = await api.getStatus(jobId);
-        if (data.current_stage === 'completed' ||
-            data.stage_history.some(s => s.stage === 'code_generation' && s.status === 'completed')) {
-          clearInterval(pollInterval);
-          toast.success('Code generation complete!');
-          fetchStatus();
-          setIsGeneratingCode(false);
-        }
-      }, 3000);
-
-      // Timeout after 5 minutes
-      setTimeout(() => {
-        clearInterval(pollInterval);
-        setIsGeneratingCode(false);
-        toast.warning('Code generation is taking longer than expected. Please check the code skeleton page.');
-      }, 300000);
-    } catch (error) {
-      toast.error('Failed to generate code');
-      setIsGeneratingCode(false);
     }
   };
 
@@ -99,7 +57,6 @@ export const DataModelPage: React.FC = () => {
   const { results } = status;
   const isGenerating = status.current_stage === 'data_model' &&
     status.stage_history.some(s => s.stage === 'data_model' && s.status === 'running');
-  const codeGenerated = results.code_tree && results.code_tree.length > 0;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-8">
@@ -205,21 +162,6 @@ export const DataModelPage: React.FC = () => {
           </Card>
         )}
 
-        {/* Code Generation Status */}
-        {codeGenerated && (
-          <div className="bg-green-50 border border-green-200 rounded-lg p-6 mb-6">
-            <div className="flex items-center gap-3">
-              <CheckCircle className="w-6 h-6 text-green-600" />
-              <div>
-                <p className="text-green-800 font-medium">Code skeleton generated!</p>
-                <p className="text-green-700 text-sm">
-                  Your code skeleton is ready for download
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Action Buttons */}
         <div className="flex gap-4 justify-between items-center bg-white rounded-lg shadow-sm p-6">
           <Button
@@ -230,33 +172,14 @@ export const DataModelPage: React.FC = () => {
             Back to Gherkin Tests
           </Button>
 
-          {!codeGenerated && status.artefacts.code_skeleton && (
-            <Button
-              onClick={handleGenerateCode}
-              disabled={isGeneratingCode || results.entities.length === 0 || isGenerating}
-              className="flex items-center gap-2"
-            >
-              {isGeneratingCode ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Generating Code...
-                </>
-              ) : (
-                <>
-                  Generate Code Skeleton
-                </>
-              )}
-            </Button>
-          )}
-
-          {codeGenerated && (
-            <Button
-              onClick={() => navigate(`/code/${jobId}`)}
-              className="flex items-center gap-2"
-            >
-              View Code Skeleton
-            </Button>
-          )}
+          <Button
+            onClick={() => navigate(`/summary/${jobId}`)}
+            disabled={results.entities.length === 0 || isGenerating}
+            className="flex items-center gap-2"
+          >
+            Continue to Summary
+            <ArrowRight className="w-4 h-4 ml-2" />
+          </Button>
         </div>
       </div>
     </div>

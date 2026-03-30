@@ -56,12 +56,6 @@ export const GenerateMorePanel: React.FC<GenerateMorePanelProps> = ({
           toast.info('Generation complete or taking longer than expected');
         }
       }, 3000);
-
-      // Clear interval after first successful update
-      setTimeout(() => {
-        clearInterval(pollInterval);
-        setIsGenerating(false);
-      }, 6000); // Stop polling after 6 seconds (2 polls)
     } catch (error) {
       toast.error('Failed to generate more artifacts');
       setIsGenerating(false);

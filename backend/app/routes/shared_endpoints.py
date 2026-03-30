@@ -2,7 +2,6 @@ import os
 import json
 import shutil
 import tempfile
-import asyncio
 from datetime import datetime
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
@@ -120,7 +119,8 @@ async def download_results(job_id: str):
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error creating ZIP: {str(e)}")
+        log_error("Error creating download ZIP", error=e, job_id=job_id)
+        raise HTTPException(status_code=500, detail="Failed to create download archive")
 
 
 @router.post("/stories/{story_id}/more-tests")
@@ -184,9 +184,6 @@ async def generate_more_tests(
             job.results.functional_tests.append(test)
             new_tests.append(test)
 
-        # Rate limiting delay
-        await asyncio.sleep(3)
-
         return {
             "story_id": story_id,
             "new_tests_count": len(new_tests),
@@ -196,7 +193,8 @@ async def generate_more_tests(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error generating tests: {str(e)}")
+        log_error("Error generating more tests", error=e, job_id=job_id, story_id=story_id)
+        raise HTTPException(status_code=500, detail="Failed to generate additional tests")
 
 
 @router.post("/validate-brd")
@@ -276,7 +274,8 @@ async def validate_brd(
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid payload format")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        log_error("Error during BRD validation", error=e)
+        raise HTTPException(status_code=500, detail="Failed to validate BRD")
 
 
 @router.post("/update-gap-fix/{job_id}")
@@ -318,7 +317,7 @@ async def update_gap_fix(job_id: str, request: UpdateGapFixRequest):
         raise
     except Exception as e:
         log_error("Error updating gap fix", error=e, job_id=job_id)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.put("/update-epic/{job_id}/{epic_id}")
@@ -357,7 +356,7 @@ async def update_epic(job_id: str, epic_id: str, request: UpdateEpicRequest):
         raise
     except Exception as e:
         log_error("Error updating epic", error=e, job_id=job_id, epic_id=epic_id)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.put("/update-story/{job_id}/{story_id}")
@@ -401,7 +400,7 @@ async def update_story(job_id: str, story_id: str, request: UpdateStoryRequest):
         raise
     except Exception as e:
         log_error("Error updating story", error=e, job_id=job_id, story_id=story_id)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.put("/update-acceptance-criteria/{job_id}/{story_id}")
@@ -446,7 +445,7 @@ async def update_acceptance_criteria(job_id: str, story_id: str, request: Update
         raise
     except Exception as e:
         log_error("Error updating acceptance criteria", error=e, job_id=job_id, story_id=story_id)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.delete("/delete-epic/{job_id}/{epic_id}")
@@ -497,7 +496,8 @@ async def delete_epic(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        log_error("Error deleting epic", error=e, job_id=job_id, epic_id=epic_id)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.delete("/delete-story/{job_id}/{story_id}")
@@ -548,7 +548,8 @@ async def delete_story(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        log_error("Error deleting story", error=e, job_id=job_id, story_id=story_id)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.put("/update-functional-test/{job_id}/{test_id}")
@@ -585,7 +586,7 @@ async def update_functional_test(job_id: str, test_id: str, request: UpdateFunct
         raise
     except Exception as e:
         log_error("Error updating functional test", error=e, job_id=job_id, test_id=test_id)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.put("/update-gherkin-test/{job_id}/{test_id}")
@@ -622,7 +623,7 @@ async def update_gherkin_test(job_id: str, test_id: str, request: UpdateGherkinT
         raise
     except Exception as e:
         log_error("Error updating Gherkin test", error=e, job_id=job_id, test_id=test_id)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.delete("/delete-test/{job_id}/{test_id}")
@@ -680,4 +681,4 @@ async def delete_test(job_id: str, test_id: str, request: DeleteTestRequest):
         raise
     except Exception as e:
         log_error("Error deleting test", error=e, job_id=job_id, test_id=test_id)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")

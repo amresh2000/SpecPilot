@@ -4,32 +4,7 @@ import { Loader2, ArrowLeft, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { useToast } from '../components/ui/ToastContainer';
 import { api } from '../lib/api';
-
-interface CTQScore {
-  score: number;
-  findings: string[];
-  recommendations: string[];
-}
-
-interface ValidationReport {
-  ctq_scores: Record<string, number>;
-  overall_score: number;
-  key_gaps: string[];
-  remediation_actions: string[];
-  detailed_findings: Record<string, CTQScore>;
-}
-
-interface GapFix {
-  gap_id: string;
-  gap_description: string;
-  affected_section: string;
-  current_text: string;
-  suggested_fix: string;
-  rationale: string;
-  confidence: string;
-  user_action?: string;
-  final_text?: string;
-}
+import type { ValidationReport, GapFix } from '../types';
 
 export const ValidationPage: React.FC = () => {
   const { jobId } = useParams<{ jobId: string }>();

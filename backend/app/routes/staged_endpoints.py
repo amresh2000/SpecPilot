@@ -10,6 +10,14 @@ from pathlib import Path
 router = APIRouter()
 GENERATED_DIR = Path("generated")
 
+STAGE_ORDER = [
+    PipelineStage.VALIDATION,
+    PipelineStage.EPICS,
+    PipelineStage.FUNCTIONAL_TESTS,
+    PipelineStage.GHERKIN_TESTS,
+    PipelineStage.DATA_MODEL,
+]
+
 
 @router.post("/proceed-to-stage/{job_id}")
 async def proceed_to_stage(job_id: str, request: ProceedToStageRequest, background_tasks: BackgroundTasks):
@@ -28,6 +36,15 @@ async def proceed_to_stage(job_id: str, request: ProceedToStageRequest, backgrou
             s.stage == stage and s.status == "completed"
             for s in job.stage_history
         )
+
+        if not stage_already_completed:
+            current_idx = STAGE_ORDER.index(job.current_stage) if job.current_stage in STAGE_ORDER else -1
+            next_idx = STAGE_ORDER.index(stage) if stage in STAGE_ORDER else -1
+            if next_idx != current_idx + 1:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid stage transition: cannot go from '{job.current_stage}' to '{stage}'"
+                )
 
         if stage_already_completed:
             job.current_stage = stage
@@ -79,7 +96,8 @@ async def proceed_to_stage(job_id: str, request: ProceedToStageRequest, backgrou
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        log_error("Error in proceed-to-stage", error=e, job_id=job_id)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/generate-more/{job_id}")
@@ -236,4 +254,5 @@ async def generate_more(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        log_error("Error in generate-more", error=e, job_id=job_id)
+        raise HTTPException(status_code=500, detail="Internal server error")

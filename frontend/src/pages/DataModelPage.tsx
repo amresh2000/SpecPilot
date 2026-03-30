@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Loader2, ArrowLeft, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
@@ -15,11 +15,14 @@ export const DataModelPage: React.FC = () => {
 
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     fetchStatus();
-    const interval = setInterval(fetchStatus, 3000);
-    return () => clearInterval(interval);
+    intervalRef.current = setInterval(fetchStatus, 3000);
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
   }, [jobId]);
 
   const fetchStatus = async () => {
@@ -29,6 +32,11 @@ export const DataModelPage: React.FC = () => {
       const data = await api.getStatus(jobId);
       setStatus(data);
       setIsLoading(false);
+      const stageRunning = data.stage_history.some(s => s.status === 'running');
+      if (!stageRunning && intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
     } catch (error) {
       console.error('Failed to fetch status:', error);
       setIsLoading(false);

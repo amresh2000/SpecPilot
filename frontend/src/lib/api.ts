@@ -1,7 +1,12 @@
 import axios from 'axios';
-import type { GenerateRequest, StatusResponse, GenerateMoreRequest, PipelineStage } from '@/types';
+import type { GenerateRequest, StatusResponse, GenerateMoreRequest, PipelineStage, ValidationReport, GapFix } from '@/types';
 
 const API_BASE_URL = 'http://localhost:8000/api';
+
+interface MutationSuccess {
+  success: boolean;
+  message?: string;
+}
 
 export const api = {
   async getStatus(jobId: string): Promise<StatusResponse> {
@@ -31,7 +36,10 @@ export const api = {
     return `${API_BASE_URL}/download/${jobId}`;
   },
 
-  async validateBRD(file: File, request: GenerateRequest): Promise<any> {
+  async validateBRD(
+    file: File,
+    request: GenerateRequest
+  ): Promise<{ job_id: string; validation_report: ValidationReport; gap_fixes: GapFix[] }> {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('payload', JSON.stringify(request));
@@ -50,7 +58,7 @@ export const api = {
     gapId: string,
     action: string,
     finalText?: string
-  ): Promise<any> {
+  ): Promise<{ gap_id: string; action: string; updated: boolean }> {
     const response = await axios.post(`${API_BASE_URL}/update-gap-fix/${jobId}`, {
       gap_id: gapId,
       action,
@@ -65,7 +73,7 @@ export const api = {
     epicId: string,
     name: string,
     description: string
-  ): Promise<any> {
+  ): Promise<{ success: boolean; epic_id: string; updated: { name: string; description: string } }> {
     const response = await axios.put(
       `${API_BASE_URL}/update-epic/${jobId}/${epicId}`,
       { name, description }
@@ -81,7 +89,7 @@ export const api = {
     role: string,
     goal: string,
     benefit: string
-  ): Promise<any> {
+  ): Promise<{ success: boolean; story_id: string; updated: { title: string; role: string; goal: string; benefit: string } }> {
     const response = await axios.put(
       `${API_BASE_URL}/update-story/${jobId}/${storyId}`,
       { title, role, goal, benefit }
@@ -94,7 +102,7 @@ export const api = {
     jobId: string,
     storyId: string,
     criteria: string[]
-  ): Promise<any> {
+  ): Promise<{ success: boolean; story_id: string; criteria_count: number }> {
     const response = await axios.put(
       `${API_BASE_URL}/update-acceptance-criteria/${jobId}/${storyId}`,
       { criteria }
@@ -103,22 +111,31 @@ export const api = {
     return response.data;
   },
 
-
-  async deleteEpic(jobId: string, epicId: string): Promise<any> {
+  async deleteEpic(
+    jobId: string,
+    epicId: string
+  ): Promise<{ success: boolean; epic_id: string; deleted_stories_count: number; message: string }> {
     const response = await axios.delete(
       `${API_BASE_URL}/delete-epic/${jobId}/${epicId}`
     );
     return response.data;
   },
 
-  async deleteStory(jobId: string, storyId: string): Promise<any> {
+  async deleteStory(
+    jobId: string,
+    storyId: string
+  ): Promise<{ success: boolean; story_id: string; deleted_functional_tests: number; deleted_gherkin_tests: number; message: string }> {
     const response = await axios.delete(
       `${API_BASE_URL}/delete-story/${jobId}/${storyId}`
     );
     return response.data;
   },
 
-  async deleteTest(jobId: string, testId: string, testType: 'functional' | 'gherkin'): Promise<any> {
+  async deleteTest(
+    jobId: string,
+    testId: string,
+    testType: 'functional' | 'gherkin'
+  ): Promise<{ success: boolean; test_id: string; test_type: string; message: string }> {
     const response = await axios.delete(
       `${API_BASE_URL}/delete-test/${jobId}/${testId}`,
       {
@@ -136,7 +153,7 @@ export const api = {
     preconditions: string[],
     testSteps: string[],
     expectedResults: string[]
-  ): Promise<any> {
+  ): Promise<MutationSuccess> {
     const response = await axios.put(
       `${API_BASE_URL}/update-functional-test/${jobId}/${testId}`,
       {
@@ -159,7 +176,7 @@ export const api = {
     given: string[],
     when: string[],
     then: string[]
-  ): Promise<any> {
+  ): Promise<MutationSuccess> {
     const response = await axios.put(
       `${API_BASE_URL}/update-gherkin-test/${jobId}/${testId}`,
       {
@@ -175,7 +192,10 @@ export const api = {
   },
 
   // Staged Pipeline Endpoints
-  async proceedToStage(jobId: string, nextStage: PipelineStage): Promise<any> {
+  async proceedToStage(
+    jobId: string,
+    nextStage: PipelineStage
+  ): Promise<{ job_id: string; stage: PipelineStage; status: string; message?: string }> {
     const response = await axios.post(
       `${API_BASE_URL}/proceed-to-stage/${jobId}`,
       { next_stage: nextStage }
@@ -183,7 +203,10 @@ export const api = {
     return response.data;
   },
 
-  async generateMore(jobId: string, request: GenerateMoreRequest): Promise<any> {
+  async generateMore(
+    jobId: string,
+    request: GenerateMoreRequest
+  ): Promise<{ job_id: string; stage: PipelineStage; status: string }> {
     const response = await axios.post(
       `${API_BASE_URL}/generate-more/${jobId}`,
       request

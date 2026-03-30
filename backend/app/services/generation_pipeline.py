@@ -1,3 +1,4 @@
+import asyncio
 import time
 from typing import Dict, Any
 from app.services.job_manager import job_manager
@@ -54,7 +55,8 @@ class GenerationPipeline:
 
         try:
             # Phase 1: Generate project name + epics only
-            result = self.llm_client.generate_epics_and_stories(
+            result = await asyncio.to_thread(
+                self.llm_client.generate_epics_and_stories,
                 job.brd_data,
                 job.instructions,
                 self.gap_fixes,
@@ -77,7 +79,8 @@ class GenerationPipeline:
 
             for i in range(0, len(epics_data), EPIC_BATCH_SIZE):
                 epic_batch = epics_data[i:i + EPIC_BATCH_SIZE]
-                batch_result = self.llm_client.generate_user_stories_for_epics(
+                batch_result = await asyncio.to_thread(
+                    self.llm_client.generate_user_stories_for_epics,
                     epic_batch,
                     job.brd_data,
                     job.instructions,
@@ -133,7 +136,8 @@ class GenerationPipeline:
             stories = job.results.user_stories
             for i in range(0, len(stories), STORY_BATCH_SIZE):
                 batch = stories[i:i + STORY_BATCH_SIZE]
-                result = self.llm_client.generate_functional_tests(
+                result = await asyncio.to_thread(
+                    self.llm_client.generate_functional_tests,
                     batch,
                     job.instructions,
                     brd_chunks if brd_chunks else None,
@@ -175,12 +179,13 @@ class GenerationPipeline:
                     chunk_ids.update(story.source_chunks)
             brd_chunks = [c for c in all_chunks if c['id'] in chunk_ids] if chunk_ids else all_chunks
 
-            result = self.llm_client.generate_gherkin_tests(
+            result = await asyncio.to_thread(
+                self.llm_client.generate_gherkin_tests,
                 job.results.user_stories,
                 job.results.functional_tests,
-                job.instructions,   # was hardcoded ""
-                brd_chunks=brd_chunks if brd_chunks else None,
-                job_id=self.job_id
+                job.instructions,
+                brd_chunks if brd_chunks else None,
+                self.job_id
             )
 
             for scenario_data in result.get('gherkin_tests', []):
@@ -208,7 +213,8 @@ class GenerationPipeline:
         try:
             job.update_step("Generating Data Model", StepStatus.RUNNING)
 
-            result = self.llm_client.generate_data_model(
+            result = await asyncio.to_thread(
+                self.llm_client.generate_data_model,
                 job.brd_data,
                 job.results.user_stories,
                 self.gap_fixes,

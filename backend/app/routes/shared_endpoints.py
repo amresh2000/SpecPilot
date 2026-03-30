@@ -35,6 +35,8 @@ async def get_status(job_id: str):
 
     return StatusResponse(
         status=job.status,
+        current_stage=job.current_stage,
+        stage_history=job.stage_history,
         error=job.error,
         steps=job.steps,
         results=job.results,
@@ -67,14 +69,14 @@ async def download_results(job_id: str):
             if job.results.epics or job.results.user_stories:
                 with open(temp_path / "epics_and_stories.json", 'w') as f:
                     json.dump({
-                        "epics": [epic.dict() for epic in job.results.epics],
-                        "user_stories": [story.dict() for story in job.results.user_stories]
+                        "epics": [epic.model_dump() for epic in job.results.epics],
+                        "user_stories": [story.model_dump() for story in job.results.user_stories]
                     }, f, indent=2)
 
             # Write functional tests
             if job.results.functional_tests:
                 with open(temp_path / "functional_tests.json", 'w') as f:
-                    json.dump([test.dict() for test in job.results.functional_tests], f, indent=2)
+                    json.dump([test.model_dump() for test in job.results.functional_tests], f, indent=2)
 
             # Write Gherkin tests
             if job.results.gherkin_tests:
@@ -101,7 +103,7 @@ async def download_results(job_id: str):
             # Write entities
             if job.results.entities:
                 with open(temp_path / "entities.json", 'w') as f:
-                    json.dump([entity.dict() for entity in job.results.entities], f, indent=2)
+                    json.dump([entity.model_dump() for entity in job.results.entities], f, indent=2)
 
             # Write Mermaid diagram
             if job.results.mermaid:
@@ -188,7 +190,7 @@ async def generate_more_tests(
         return {
             "story_id": story_id,
             "new_tests_count": len(new_tests),
-            "new_tests": [test.dict() for test in new_tests]
+            "new_tests": [test.model_dump() for test in new_tests]
         }
 
     except HTTPException:
@@ -268,7 +270,7 @@ async def validate_brd(
         return {
             "job_id": job_id,
             "validation_report": validation_result,
-            "gap_fixes": [gf.dict() for gf in job.results.gap_fixes]
+            "gap_fixes": [gf.model_dump() for gf in job.results.gap_fixes]
         }
 
     except json.JSONDecodeError:

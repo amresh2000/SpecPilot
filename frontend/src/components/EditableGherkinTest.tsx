@@ -227,7 +227,7 @@ export const EditableGherkinTest: React.FC<EditableGherkinTestProps> = ({ scenar
                     type="text"
                     value={newGiven}
                     onChange={(e) => setNewGiven(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleAddGiven()}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddGiven()}
                     placeholder="Add new Given statement..."
                     className="flex-1 p-2 border rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
@@ -270,7 +270,7 @@ export const EditableGherkinTest: React.FC<EditableGherkinTestProps> = ({ scenar
                     type="text"
                     value={newWhen}
                     onChange={(e) => setNewWhen(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleAddWhen()}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddWhen()}
                     placeholder="Add new When statement..."
                     className="flex-1 p-2 border rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
@@ -313,7 +313,7 @@ export const EditableGherkinTest: React.FC<EditableGherkinTestProps> = ({ scenar
                     type="text"
                     value={newThen}
                     onChange={(e) => setNewThen(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleAddThen()}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddThen()}
                     placeholder="Add new Then statement..."
                     className="flex-1 p-2 border rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />

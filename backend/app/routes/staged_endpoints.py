@@ -222,9 +222,8 @@ async def generate_more(
                         job.results.gherkin_tests.append(scenario)
 
             except Exception as e:
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.error(f"Generate more failed: {e}", exc_info=True)
+                log_error("Generate more failed", error=e, job_id=job_id)
+                job.mark_failed(str(e))
 
         background_tasks.add_task(run_generate_more)
 

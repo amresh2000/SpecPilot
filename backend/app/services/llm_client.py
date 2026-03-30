@@ -13,6 +13,7 @@ from app.models import (
     GherkinScenario, Entity, EntityField
 )
 from app.config import config as app_config
+from app.utils import log_info, log_warning, log_error
 
 
 class BedrockLLMClient:
@@ -37,7 +38,7 @@ class BedrockLLMClient:
                 'http': app_config.HTTP_PROXY,
                 'https': app_config.HTTPS_PROXY or app_config.HTTP_PROXY
             }
-            print(f"Boto3 using explicit proxy: {app_config.HTTP_PROXY}")
+            log_info(f"Boto3 using explicit proxy: {app_config.HTTP_PROXY}")
 
         boto_config = Config(**boto_config_params)
 
@@ -51,7 +52,7 @@ class BedrockLLMClient:
         )
         # Use model ID from configuration
         self.model_id = app_config.AWS_BEDROCK_MODEL_ID
-        print(f"Using Bedrock model: {self.model_id}")
+        log_info(f"Using Bedrock model: {self.model_id}")
         self.max_retries = 5  # Increased from 1 to 5
         self.base_delay = 2  # Base delay in seconds for exponential backoff
 
@@ -98,11 +99,11 @@ class BedrockLLMClient:
             with open(log_path, 'w', encoding='utf-8') as f:
                 json.dump(log_entry, f, indent=2, ensure_ascii=False)
 
-            print(f"LLM error logged to: {log_path}")
+            log_info(f"LLM error logged to: {log_path}")
 
         except Exception as e:
             # Don't fail the main operation if logging fails
-            print(f"Failed to log LLM error: {str(e)}")
+            log_warning(f"Failed to log LLM error: {str(e)}")
 
     def _invoke_claude(self, prompt: str, system_prompt: str = "", job_id: str = None, stage: str = None) -> Dict[str, Any]:
         """Invoke Claude with exponential backoff retry logic for throttling"""
@@ -115,9 +116,9 @@ class BedrockLLMClient:
 
                 request_body = {
                     "anthropic_version": "bedrock-2023-05-31",
-                    "max_tokens": 32768,  # Increased to 32768 to allow full BRD processing and larger outputs
+                    "max_tokens": 64000,  # Claude Sonnet 4.5 supports up to 64K output tokens
                     "messages": messages,
-                    "temperature": 0.7,
+                    "temperature": 0.3,  # Lower temperature = more deterministic JSON, fewer empty arrays
                 }
 
                 if system_prompt:
@@ -141,7 +142,7 @@ class BedrockLLMClient:
                     match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', content, re.DOTALL)
                     if match:
                         error_msg = "WARNING: Claude returned markdown-wrapped JSON, extracting from code block..."
-                        print(error_msg)
+                        log_warning(error_msg)
 
                         # Log the markdown wrapping issue
                         if job_id and stage:
@@ -162,7 +163,7 @@ class BedrockLLMClient:
                     end = content.rfind('}')
                     if start != -1 and end > start:
                         error_msg = f"WARNING: Extracting JSON from mixed content (found {{ at {start}, }} at {end})..."
-                        print(error_msg)
+                        log_warning(error_msg)
 
                         # Log the mixed content extraction issue
                         if job_id and stage:
@@ -204,7 +205,7 @@ class BedrockLLMClient:
                 # JSON parsing error - retry with exponential backoff
                 if attempt < self.max_retries:
                     delay = self.base_delay * (2 ** attempt)
-                    print(f"JSON parse error, retrying in {delay}s (attempt {attempt + 1}/{self.max_retries + 1})...")
+                    log_warning(f"JSON parse error, retrying in {delay}s (attempt {attempt + 1}/{self.max_retries + 1})...")
                     time.sleep(delay)
                     last_error = e
                     continue
@@ -218,7 +219,7 @@ class BedrockLLMClient:
                 if error_code == 'ThrottlingException' and attempt < self.max_retries:
                     # Exponential backoff: 2s, 4s, 8s, 16s, 32s
                     delay = self.base_delay * (2 ** attempt)
-                    print(f"Throttled by Bedrock, retrying in {delay}s (attempt {attempt + 1}/{self.max_retries + 1})...")
+                    log_warning(f"Throttled by Bedrock, retrying in {delay}s (attempt {attempt + 1}/{self.max_retries + 1})...")
                     time.sleep(delay)
                     last_error = e
                     continue
@@ -242,12 +243,10 @@ class BedrockLLMClient:
         existing_epics: List[Dict[str, str]] = None,
         job_id: str = None
     ) -> Dict[str, Any]:
-        """Call A: BRD → project_name + epics + user stories"""
+        """Call A1: BRD → project_name + epics only (user stories generated separately in batches)"""
 
-        # Build gap fixes context
         gap_fixes_text = self._build_gap_fixes_context(gap_fixes)
 
-        # Build existing epics exclusion context
         existing_epics_text = ""
         if existing_epics and len(existing_epics) > 0:
             existing_epics_text = "\n\n## EXISTING EPICS (DO NOT DUPLICATE)\n"
@@ -256,47 +255,26 @@ class BedrockLLMClient:
                 existing_epics_text += f"{i}. {epic['name']}: {epic['description']}\n"
             existing_epics_text += "\nIMPORTANT: Do not regenerate these epics or create similar ones. Focus on NEW features.\n"
 
-        # Prepare context from BRD - send ALL chunks with full content
+        # Send BRD as chunks only — chunks contain section title, section ID, type, and full text.
+        # Tables are captured as type="table" chunks. Sending sections/tables separately triplicates content.
         chunks = brd_data.get('chunks', [])
         chunks_text = "\n\n".join([
             f"## Chunk {c['id']} - {c.get('section_title', 'Section ' + str(c.get('section_id', 'unknown')))}\n"
             f"**Section ID**: {c.get('section_id', 'N/A')}\n"
             f"**Type**: {c['type']}\n"
             f"**Content**:\n{c['text']}"
-            for c in chunks  # Send ALL chunks, no limit
+            for c in chunks
         ])
 
-        # Send ALL sections with full content
-        sections_text = "\n\n".join([
-            f"## Section {s['id']}: {s['title']}\n{s['text']}"
-            for s in brd_data.get('sections', [])  # Send ALL sections
-        ])
+        prompt = f"""Analyze this Business Requirements Document and generate a project name and EPICs (high-level feature themes).
+Do NOT generate user stories — those will be generated separately.
 
-        # Send ALL tables with full rows
-        tables_text = "\n\n".join([
-            f"## Table {t['table_id']}: {', '.join(t['headers'])}\n" +
-            "\n".join([str(row) for row in t['rows']])
-            for t in brd_data.get('tables', [])  # Send ALL tables with ALL rows
-        ])
-
-        prompt = f"""Analyze this Business Requirements Document and generate:
-1. A project name
-2. EPICs (high-level features/themes)
-3. User Stories with acceptance criteria
-
-BRD Chunks (Reference these by ID in source_chunks):
+BRD Content (chunked by section):
 {chunks_text}
-
-BRD Content:
-{sections_text}
-
-{tables_text if tables_text else ''}
 {gap_fixes_text}
 {existing_epics_text}
 Special Instructions:
 {instructions if instructions else 'None'}
-
-IMPORTANT: For each user story and acceptance criterion, identify which BRD chunks were used as source material and include their IDs in the source_chunks array.
 
 Output must be valid JSON matching this schema:
 {{
@@ -307,30 +285,11 @@ Output must be valid JSON matching this schema:
       "name": "string",
       "description": "string"
     }}
-  ],
-  "user_stories": [
-    {{
-      "id": "story_1",
-      "epic_id": "epic_1",
-      "title": "string",
-      "role": "string",
-      "goal": "string",
-      "benefit": "string",
-      "acceptance_criteria": [
-        {{
-          "id": "ac_1",
-          "text": "string",
-          "source_chunks": ["chunk_1"]
-        }}
-      ],
-      "source_chunks": ["chunk_1"]
-    }}
   ]
 }}
 
-Use format: "As a [role], I want [goal] so that [benefit]" for stories.
-Make acceptance criteria specific and testable.
-Include source_chunks references to BRD sections where applicable.
+Generate a comprehensive set of EPICs that cover all major feature areas in the BRD.
+Each EPIC should represent a distinct high-level theme or capability.
 """
 
         system_prompt = """You are an expert business analyst.
@@ -343,7 +302,7 @@ CRITICAL JSON FORMAT REQUIREMENTS:
 - NO comments inside the JSON
 
 Correct format example:
-{"project_name": "System", "epics": [], "user_stories": []}
+{"project_name": "Trade Processing System", "epics": [{"id": "epic_1", "name": "Trade Booking", "description": "Covers all trade entry and booking workflows"}]}
 
 INCORRECT format (DO NOT DO THIS):
 ```json
@@ -353,6 +312,102 @@ INCORRECT format (DO NOT DO THIS):
 Begin your response now with { character:"""
 
         return self._invoke_claude(prompt, system_prompt, job_id=job_id, stage="EPICS")
+
+    def generate_user_stories_for_epics(
+        self,
+        epics_batch: List[Dict[str, Any]],
+        brd_data: Dict[str, Any],
+        instructions: str,
+        gap_fixes: List[Dict[str, str]] = None,
+        story_id_offset: int = 0,
+        job_id: str = None
+    ) -> Dict[str, Any]:
+        """Call A2: BRD + epic batch → User Stories with acceptance criteria.
+
+        Called once per batch of epics to keep output within token budget.
+        story_id_offset ensures unique IDs across batches (e.g., offset=20 → story_21, story_22...).
+        """
+
+        gap_fixes_text = self._build_gap_fixes_context(gap_fixes)
+
+        epics_text = "\n\n".join([
+            f"Epic {e['id']}: {e['name']}\nDescription: {e['description']}"
+            for e in epics_batch
+        ])
+
+        # Only send chunks relevant to these epics — use all chunks since we can't filter at this stage
+        chunks = brd_data.get('chunks', [])
+        chunks_text = "\n\n".join([
+            f"## Chunk {c['id']} - {c.get('section_title', 'Section ' + str(c.get('section_id', 'unknown')))}\n"
+            f"**Type**: {c['type']}\n"
+            f"**Content**:\n{c['text']}"
+            for c in chunks
+        ])
+
+        prompt = f"""Generate detailed User Stories with acceptance criteria for the following EPICs.
+
+EPICs to generate stories for:
+{epics_text}
+
+BRD Content (chunked by section — reference chunk IDs in source_chunks):
+{chunks_text}
+{gap_fixes_text}
+Special Instructions:
+{instructions if instructions else 'None'}
+
+IMPORTANT:
+- Generate stories ONLY for the EPICs listed above, not for any other epics.
+- Start story IDs from story_{story_id_offset + 1} to avoid conflicts with other batches.
+- For each story and acceptance criterion, include source_chunks referencing the BRD chunk IDs used.
+- Generate ALL user stories needed to fully cover each epic — do not leave any requirement uncovered.
+
+Output must be valid JSON matching this schema:
+{{
+  "user_stories": [
+    {{
+      "id": "story_{story_id_offset + 1}",
+      "epic_id": "epic_1",
+      "title": "string",
+      "role": "string",
+      "goal": "string",
+      "benefit": "string",
+      "acceptance_criteria": [
+        {{
+          "id": "ac_{story_id_offset + 1}_1",
+          "text": "string",
+          "source_chunks": ["chunk_1"]
+        }}
+      ],
+      "source_chunks": ["chunk_1"]
+    }}
+  ]
+}}
+
+Use format: "As a [role], I want [goal] so that [benefit]" for each story.
+Make acceptance criteria specific and testable.
+You MUST generate at least one user story per epic. Do not return an empty user_stories array.
+"""
+
+        system_prompt = """You are an expert business analyst specializing in agile user story creation.
+
+CRITICAL JSON FORMAT REQUIREMENTS:
+- Your response MUST be ONLY valid JSON
+- Start with { character and end with } character
+- NO markdown code blocks (no ``` or ```json)
+- NO explanatory text before or after the JSON
+- NO comments inside the JSON
+
+Correct format example:
+{"user_stories": [{"id": "story_1", "epic_id": "epic_1", "title": "Login with credentials", "role": "registered user", "goal": "log in with my username and password", "benefit": "I can access my account securely", "acceptance_criteria": [{"id": "ac_1_1", "text": "Given valid credentials, when I submit the form, then I am redirected to the dashboard", "source_chunks": ["chunk_1"]}], "source_chunks": ["chunk_1"]}]}
+
+INCORRECT format (DO NOT DO THIS):
+```json
+{"user_stories": []}
+```
+
+Begin your response now with { character:"""
+
+        return self._invoke_claude(prompt, system_prompt, job_id=job_id, stage="USER_STORIES")
 
     def generate_functional_tests(
         self,
@@ -424,7 +479,7 @@ CRITICAL JSON FORMAT REQUIREMENTS:
 - NO comments inside the JSON
 
 Correct format example:
-{"functional_tests": []}
+{"functional_tests": [{"id": "test_1", "story_id": "story_1", "title": "Verify login with valid credentials", "objective": "Ensure users can authenticate with correct username and password", "preconditions": ["User account exists", "User is on the login page"], "test_steps": ["Enter valid username", "Enter valid password", "Click Submit"], "expected_results": ["User is redirected to dashboard", "Session cookie is set"], "source_chunks": ["chunk_1"]}]}
 
 INCORRECT format (DO NOT DO THIS):
 ```json
@@ -440,9 +495,10 @@ Begin your response now with { character:"""
         user_stories: List[UserStory],
         functional_tests: List[FunctionalTest] = None,
         instructions: str = "",
+        brd_chunks: Optional[List[Dict[str, Any]]] = None,
         job_id: str = None
     ) -> Dict[str, Any]:
-        """Call C: User Stories + Functional Tests → Gherkin scenarios"""
+        """Call C: User Stories + Functional Tests + BRD chunks → Gherkin scenarios"""
 
         stories_text = "\n\n".join([
             f"Story {s.id}: {s.title}\n"
@@ -461,11 +517,20 @@ Begin your response now with { character:"""
                 functional_tests_text += f"Objective: {test.objective}\n"
                 functional_tests_text += f"Steps: {', '.join(test.test_steps[:3])}{'...' if len(test.test_steps) > 3 else ''}\n"
 
+        # Include relevant BRD chunks for domain grounding
+        chunks_context = ""
+        if brd_chunks:
+            chunks_context = "\n\nRelevant BRD Context:\n" + "\n\n".join([
+                f"Chunk {c['id']} - {c.get('section_title', 'Section')}:\n{c['text']}"
+                for c in brd_chunks
+            ])
+
         prompt = f"""Generate Gherkin BDD scenarios for these user stories.
 
 User Stories:
 {stories_text}
 {functional_tests_text}
+{chunks_context}
 
 Special Instructions:
 {instructions if instructions else 'None'}
@@ -499,7 +564,7 @@ CRITICAL JSON FORMAT REQUIREMENTS:
 - NO comments inside the JSON
 
 Correct format example:
-{"gherkin_tests": []}
+{"gherkin_tests": [{"id": "gherkin_1", "story_id": "story_1", "feature_name": "User Authentication", "scenario_name": "Successful login with valid credentials", "given": ["the user is on the login page", "a valid account exists"], "when": ["the user enters valid credentials", "the user clicks Submit"], "then": ["the user is redirected to the dashboard", "a welcome message is displayed"], "source_chunks": ["chunk_1"]}]}
 
 INCORRECT format (DO NOT DO THIS):
 ```json
@@ -519,25 +584,36 @@ Begin your response now with { character:"""
     ) -> Dict[str, Any]:
         """Call D: BRD + stories → Entities + Mermaid"""
 
-        # Build gap fixes context
         gap_fixes_text = self._build_gap_fixes_context(gap_fixes)
 
-        # Send ALL tables with ALL rows (no limits)
+        # Tables are the primary source for data model entities
         tables_text = "\n\n".join([
             f"## Table {t['table_id']}:\nHeaders: {', '.join(t['headers'])}\n" +
-            "\n".join([str(row) for row in t['rows']])  # ALL rows
-            for t in brd_data.get('tables', [])  # ALL tables
+            "\n".join([str(row) for row in t['rows']])
+            for t in brd_data.get('tables', [])
         ])
 
-        # Send ALL user stories
-        stories_text = "\n".join([f"- {s.title}" for s in user_stories])
+        # Include BRD sections (summarized) — entities are often described in prose, not just tables
+        sections_text = "\n\n".join([
+            f"## {s['title']}\n{s['text'][:600]}"  # 600 chars per section to control tokens
+            for s in brd_data.get('sections', [])
+        ])
 
-        prompt = f"""Analyze this BRD and user stories to create a data model.
+        # Include story titles + goals + acceptance criteria — ACs are the richest source of field/entity hints
+        stories_text = "\n\n".join([
+            f"- {s.title}\n  Goal: {s.goal}\n  ACs: {'; '.join([ac.text for ac in s.acceptance_criteria[:3]])}"
+            for s in user_stories
+        ])
 
-BRD Tables:
+        prompt = f"""Analyze this BRD and user stories to create a comprehensive data model.
+
+BRD Tables (primary entity source):
 {tables_text if tables_text else 'No tables found'}
 
-User Stories:
+BRD Sections (for entity discovery from prose):
+{sections_text if sections_text else 'No sections found'}
+
+User Stories with Acceptance Criteria (for field/relationship discovery):
 {stories_text}
 {gap_fixes_text}
 
@@ -591,35 +667,20 @@ Begin your response now with { character:"""
     ) -> Dict[str, Any]:
         """Call F: BRD → 10 CTQ Validation Scores"""
 
-        # Prepare context from BRD - send ALL content for comprehensive validation
+        # Send BRD as chunks only — chunks already contain section title, section ID, type, and full text.
+        # Sending sections and tables separately would triplicate the content unnecessarily.
         chunks = brd_data.get('chunks', [])
         chunks_text = "\n\n".join([
             f"## Chunk {c['id']} - {c.get('section_title', 'Section ' + str(c.get('section_id', 'unknown')))}\n"
             f"**Section ID**: {c.get('section_id', 'N/A')}\n"
             f"**Type**: {c['type']}\n"
             f"**Content**:\n{c['text']}"
-            for c in chunks  # ALL chunks for complete validation
-        ])
-
-        sections_text = "\n\n".join([
-            f"## Section {s['id']}: {s['title']}\n{s['text']}"
-            for s in brd_data.get('sections', [])  # ALL sections
-        ])
-
-        tables_text = "\n\n".join([
-            f"## Table {t['table_id']}: {', '.join(t['headers'])}\n" +
-            "\n".join([str(row) for row in t['rows']])
-            for t in brd_data.get('tables', [])  # ALL tables with ALL rows
+            for c in chunks
         ])
 
         prompt = f"""Evaluate this Business Requirements Document across 10 Critical-to-Quality (CTQ) dimensions.
 
-BRD Content:
-{sections_text}
-
-{tables_text if tables_text else ''}
-
-BRD Chunks (for reference):
+BRD Content (chunked by section):
 {chunks_text}
 
 Evaluate each dimension on a 0-5 scale:
@@ -744,48 +805,57 @@ Begin your response now with { character:"""
         validation_report: Dict[str, Any],
         job_id: str = None
     ) -> List[Dict[str, Any]]:
-        """Call G: Validation Gaps → AI-Suggested Fixes"""
+        """Call G: Validation Gaps → AI-Suggested Fixes (single batched call instead of N calls)"""
 
-        # Send ALL sections for comprehensive gap fix generation
-        sections_text = "\n\n".join([
-            f"## Section {s['id']}: {s['title']}\n{s['text']}"
-            for s in brd_data.get('sections', [])  # ALL sections
+        gaps = validation_report.get("key_gaps", [])[:10]  # cap at 10 gaps
+        if not gaps:
+            return []
+
+        # Send BRD as chunks only — consistent with other calls
+        chunks = brd_data.get('chunks', [])
+        chunks_text = "\n\n".join([
+            f"## Chunk {c['id']} - {c.get('section_title', 'Section ' + str(c.get('section_id', 'unknown')))}\n"
+            f"**Type**: {c['type']}\n"
+            f"**Content**:\n{c['text']}"
+            for c in chunks
         ])
 
-        gap_fixes = []
+        numbered_gaps = "\n".join([f"{i+1}. {gap}" for i, gap in enumerate(gaps)])
 
-        for gap in validation_report["key_gaps"][:10]:  # Limit to 10 gaps max
-            prompt = f"""A quality gap was identified in this BRD:
+        prompt = f"""Generate specific, actionable fixes for each of the following BRD quality gaps.
 
-Gap: {gap}
+BRD Content:
+{chunks_text}
 
-BRD Context:
-{sections_text}
+Quality Gaps to Fix:
+{numbered_gaps}
 
-Generate a specific, actionable fix for this gap.
+For each gap produce one fix object. Be highly specific:
+- Use exact threshold values (e.g., "< 200ms" not "fast")
+- Include concrete examples (e.g., specific error codes)
+- Provide measurable criteria
+- Use Given-When-Then format for acceptance criteria gaps
+- Provide specific metrics/SLAs for NFR gaps
 
-Output ONLY valid JSON matching this schema:
+Output must be valid JSON matching this schema:
 {{
-  "gap_id": "gap_1",
-  "gap_description": "{gap}",
-  "affected_section": "Section 3.2 - Trade Booking",
-  "current_text": "System shall process trades",
-  "suggested_fix": "System shall process trade bookings with the following exception handling:\\n- If booking fails due to duplicate trade ID, return error code ERR_DUPLICATE and log to audit table\\n- If booking fails due to invalid counterparty, return error code ERR_INVALID_CP and notify trade desk via email\\n- System shall retry failed bookings up to 3 times with exponential backoff",
-  "rationale": "Adding specific exception flows ensures system behavior is well-defined for error scenarios and enables proper testing",
-  "confidence": "high"
+  "gap_fixes": [
+    {{
+      "gap_id": "gap_1",
+      "gap_description": "string",
+      "affected_section": "string",
+      "current_text": "string",
+      "suggested_fix": "string",
+      "rationale": "string",
+      "confidence": "high"
+    }}
+  ]
 }}
 
-Be highly specific with:
-- Exact threshold values (e.g., "< 200ms" not "fast")
-- Concrete examples (e.g., specific error codes)
-- Measurable criteria
-- Actionable steps
-
-If the gap is about acceptance criteria, use Given-When-Then format.
-If the gap is about NFRs, provide specific metrics and SLAs.
+Generate exactly {len(gaps)} fix objects — one per gap in the order listed.
 """
 
-            system_prompt = """You are an expert Business Analyst.
+        system_prompt = """You are an expert Business Analyst.
 
 CRITICAL JSON FORMAT REQUIREMENTS:
 - Your response MUST be ONLY valid JSON
@@ -795,24 +865,21 @@ CRITICAL JSON FORMAT REQUIREMENTS:
 - NO comments inside the JSON
 
 Correct format example:
-{"gap_id": "gap_1", "gap_description": "Missing data", "confidence": "high"}
+{"gap_fixes": [{"gap_id": "gap_1", "gap_description": "Missing exception flows", "affected_section": "Section 3.2", "current_text": "System shall process trades", "suggested_fix": "System shall process trades with error handling: ...", "rationale": "Specific exception flows enable proper testing", "confidence": "high"}]}
 
 INCORRECT format (DO NOT DO THIS):
 ```json
-{"gap_id": "gap_1"}
+{"gap_fixes": []}
 ```
 
 Begin your response now with { character:"""
 
-            try:
-                fix = self._invoke_claude(prompt, system_prompt, job_id=job_id, stage="GAP_FIXES")
-                gap_fixes.append(fix)
-            except Exception as e:
-                print(f"Error generating fix for gap '{gap}': {str(e)}")
-                # Continue with other gaps
-                continue
-
-        return gap_fixes
+        try:
+            result = self._invoke_claude(prompt, system_prompt, job_id=job_id, stage="GAP_FIXES")
+            return result.get("gap_fixes", [])
+        except Exception as e:
+            log_error("Error generating gap fixes", error=e)
+            return []
 
     def _build_gap_fixes_context(self, gap_fixes: List[Dict[str, str]] = None) -> str:
         """Build formatted gap fixes context for LLM prompts"""

@@ -194,7 +194,7 @@ export const SummaryPage: React.FC = () => {
         {/* Action Buttons */}
         <div className="flex gap-4 justify-center">
           <Button
-            variant="default"
+            variant="primary"
             size="lg"
             onClick={handleDownload}
             className="px-8 py-4 text-lg"

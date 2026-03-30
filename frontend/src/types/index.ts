@@ -100,6 +100,33 @@ export interface Entity {
   fields: EntityField[];
 }
 
+export interface CTQScore {
+  score: number;
+  findings: string[];
+  recommendations: string[];
+}
+
+export interface ValidationReport {
+  ctq_scores: Record<string, number>;
+  overall_score: number;
+  key_gaps: string[];
+  remediation_actions: string[];
+  detailed_findings: Record<string, CTQScore>;
+  timestamp: string;
+}
+
+export interface GapFix {
+  gap_id: string;
+  gap_description: string;
+  affected_section: string;
+  current_text: string;
+  suggested_fix: string;
+  rationale: string;
+  confidence: 'high' | 'medium' | 'low';
+  user_action?: string;
+  final_text?: string;
+}
+
 export interface GenerationResults {
   project_name?: string;
   epics: Epic[];
@@ -108,6 +135,8 @@ export interface GenerationResults {
   gherkin_tests: GherkinScenario[];
   entities: Entity[];
   mermaid?: string;
+  validation_report?: ValidationReport;
+  gap_fixes: GapFix[];
 }
 
 export interface StatusResponse {

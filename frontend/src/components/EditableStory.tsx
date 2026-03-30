@@ -214,7 +214,7 @@ export const EditableStory: React.FC<EditableStoryProps> = ({ story, jobId, onUp
                   type="text"
                   value={newCriterion}
                   onChange={(e) => setNewCriterion(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && handleAddCriterion()}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAddCriterion()}
                   placeholder="Add new criterion..."
                   className="flex-1 p-2 border rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />

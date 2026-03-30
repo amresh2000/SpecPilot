@@ -101,7 +101,7 @@ class Entity(BaseModel):
     description: str
     fields: List[EntityField]
     regenerated_at: Optional[datetime] = None
-    source_story_ids: Optional[List[str]] = []
+    source_story_ids: Optional[List[str]] = Field(default_factory=list)
 
 
 # Validation Models

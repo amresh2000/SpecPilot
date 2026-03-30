@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from './ui/Card';
 import { Edit2, Check, X, Trash2 } from 'lucide-react';
-import { EditableText } from './EditableText';
 import { useToast } from './ui/ToastContainer';
 import { api } from '../lib/api';
 import type { Epic } from '../types';

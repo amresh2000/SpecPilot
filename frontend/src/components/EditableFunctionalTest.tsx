@@ -222,7 +222,7 @@ export const EditableFunctionalTest: React.FC<EditableFunctionalTestProps> = ({ 
                     type="text"
                     value={newPrecondition}
                     onChange={(e) => setNewPrecondition(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleAddPrecondition()}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddPrecondition()}
                     placeholder="Add new precondition..."
                     className="flex-1 p-2 border rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
@@ -264,7 +264,7 @@ export const EditableFunctionalTest: React.FC<EditableFunctionalTestProps> = ({ 
                     type="text"
                     value={newTestStep}
                     onChange={(e) => setNewTestStep(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleAddTestStep()}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddTestStep()}
                     placeholder="Add new test step..."
                     className="flex-1 p-2 border rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
@@ -305,7 +305,7 @@ export const EditableFunctionalTest: React.FC<EditableFunctionalTestProps> = ({ 
                     type="text"
                     value={newExpectedResult}
                     onChange={(e) => setNewExpectedResult(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleAddExpectedResult()}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddExpectedResult()}
                     placeholder="Add new expected result..."
                     className="flex-1 p-2 border rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />

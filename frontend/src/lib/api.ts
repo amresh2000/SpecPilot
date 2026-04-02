@@ -1,5 +1,9 @@
 import axios from 'axios';
-import type { GenerateRequest, StatusResponse, GenerateMoreRequest, PipelineStage, ValidationReport, GapFix } from '@/types';
+import type {
+  GenerateRequest, StatusResponse, GenerateMoreRequest, PipelineStage,
+  ValidationReport, GapFix, AtomicRequirement, RequirementChunk,
+  AtomicRequirementType, AtomicRequirementStatus, BrdChunk, CoverageReport
+} from '@/types';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 
@@ -188,6 +192,43 @@ export const api = {
       }
     );
 
+    return response.data;
+  },
+
+  // Requirement Map Endpoints
+  async getRequirementMap(
+    jobId: string
+  ): Promise<{ requirement_chunks: RequirementChunk[]; atomic_requirements: AtomicRequirement[] }> {
+    const response = await axios.get(`${API_BASE_URL}/requirement-map/${jobId}`);
+    return response.data;
+  },
+
+  async updateAtomicRequirement(
+    jobId: string,
+    reqId: string,
+    updates: { text?: string; type?: AtomicRequirementType; status?: AtomicRequirementStatus }
+  ): Promise<{ success: boolean; req_id: string }> {
+    const response = await axios.put(`${API_BASE_URL}/atomic-requirement/${jobId}/${reqId}`, updates);
+    return response.data;
+  },
+
+  async deleteAtomicRequirement(
+    jobId: string,
+    reqId: string
+  ): Promise<{ success: boolean; req_id: string }> {
+    const response = await axios.delete(`${API_BASE_URL}/atomic-requirement/${jobId}/${reqId}`);
+    return response.data;
+  },
+
+  async getBrdChunks(
+    jobId: string
+  ): Promise<{ chunks: BrdChunk[]; tables: unknown[] }> {
+    const response = await axios.get(`${API_BASE_URL}/brd-chunks/${jobId}`);
+    return response.data;
+  },
+
+  async getCoverage(jobId: string): Promise<CoverageReport> {
+    const response = await axios.get(`${API_BASE_URL}/coverage/${jobId}`);
     return response.data;
   },
 

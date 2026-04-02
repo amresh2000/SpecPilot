@@ -139,7 +139,8 @@ class BedrockLLMClient:
                     return json.loads(content)
                 except json.JSONDecodeError:
                     # Try extracting from markdown code block
-                    match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', content, re.DOTALL)
+                    # Use greedy .* so nested ``` inside field values don't truncate the match
+                    match = re.search(r'```(?:json)?\s*\n?(.*)\n?```', content, re.DOTALL)
                     if match:
                         error_msg = "WARNING: Claude returned markdown-wrapped JSON, extracting from code block..."
                         log_warning(error_msg)
@@ -235,6 +236,86 @@ class BedrockLLMClient:
         if last_error:
             raise RuntimeError(f"Failed after {self.max_retries + 1} attempts. Last error: {str(last_error)}")
 
+    def generate_atomic_requirements(
+        self,
+        chunks: List[Dict[str, Any]],
+        job_id: str = None
+    ) -> Dict[str, Any]:
+        """Extract semantic types and atomic requirements from parsed BRD chunks.
+
+        One batched call for all chunks. Returns enriched chunk metadata + flat
+        list of atomic requirements ready to be stored in GenerationResults.
+        """
+        chunks_text = "\n\n".join([
+            f"## {c['id']} — {c.get('section_title', 'Untitled')}\n"
+            f"**type**: {c['type']}\n"
+            f"**text**:\n{c['text']}"
+            for c in chunks
+        ])
+        valid_chunk_ids = [c['id'] for c in chunks]
+
+        prompt = f"""Analyze the following BRD chunks and extract structured requirement information.
+
+BRD Chunks:
+{chunks_text}
+
+For EACH chunk produce one object in requirement_chunks with:
+- chunk_id: exactly as given (e.g. "chunk_1")
+- title: a concise human-readable title for this chunk
+- semantic_type: one of "functional_flow" | "business_rules" | "nfr" | "constraint" | "mixed" | "informational"
+- summary: 1–2 sentence summary of what this chunk covers
+- confidence: float 0.0–1.0 reflecting how clearly the chunk expresses requirements
+- has_table: true if the chunk type is "table" or its text contains tabular data
+- atomic_requirements: list of the smallest testable requirement units found in this chunk
+
+Each atomic requirement must have:
+- id: unique string like "req_1", "req_2", ... (globally unique across ALL chunks)
+- text: one clear, testable requirement statement starting with "The system shall..." or "The user shall..."
+- type: one of "functional" | "business_rule" | "exception" | "validation" | "nfr" | "constraint"
+- derived_from_table: true only if this requirement came from interpreting a table row or cell
+
+Rules:
+- Every chunk must appear in requirement_chunks, even informational ones (they may have 0 atomic requirements)
+- Only use chunk_ids from this exact list: {valid_chunk_ids}
+- Do not merge requirements — keep them atomic (one behavior per requirement)
+- For table chunks, extract each row as one or more atomic requirements
+
+Output must be valid JSON matching this schema:
+{{
+  "requirement_chunks": [
+    {{
+      "chunk_id": "chunk_1",
+      "title": "string",
+      "semantic_type": "functional_flow",
+      "summary": "string",
+      "confidence": 0.9,
+      "has_table": false,
+      "atomic_requirements": [
+        {{
+          "id": "req_1",
+          "text": "The system shall...",
+          "type": "functional",
+          "derived_from_table": false
+        }}
+      ]
+    }}
+  ]
+}}
+"""
+
+        system_prompt = """You are an expert business analyst specialising in requirements extraction.
+
+CRITICAL JSON FORMAT REQUIREMENTS:
+- Your response MUST be ONLY valid JSON
+- Start with { character and end with } character
+- NO markdown code blocks (no ``` or ```json)
+- NO explanatory text before or after the JSON
+- NO comments inside the JSON
+
+Begin your response now with { character:"""
+
+        return self._invoke_claude(prompt, system_prompt, job_id=job_id, stage="REQUIREMENT_MAP")
+
     def generate_epics_and_stories(
         self,
         brd_data: Dict[str, Any],
@@ -288,8 +369,11 @@ Output must be valid JSON matching this schema:
   ]
 }}
 
-Generate a comprehensive set of EPICs that cover all major feature areas in the BRD.
-Each EPIC should represent a distinct high-level theme or capability.
+EPIC BUDGET RULES (strictly enforced):
+- Generate between 5 and 8 EPICs. Absolute maximum is 10.
+- Combine related capabilities into a single EPIC rather than splitting them.
+- Each EPIC must represent a genuinely distinct high-level theme. Do not create an EPIC for a single minor feature.
+- If the BRD is narrow in scope, 5 well-defined EPICs is better than 8 thin ones.
 """
 
         system_prompt = """You are an expert business analyst.
@@ -320,6 +404,7 @@ Begin your response now with { character:"""
         instructions: str,
         gap_fixes: List[Dict[str, str]] = None,
         story_id_offset: int = 0,
+        atomic_requirements: List = None,
         job_id: str = None
     ) -> Dict[str, Any]:
         """Call A2: BRD + epic batch → User Stories with acceptance criteria.
@@ -329,6 +414,15 @@ Begin your response now with { character:"""
         """
 
         gap_fixes_text = self._build_gap_fixes_context(gap_fixes)
+
+        atomic_reqs_text = ""
+        if atomic_requirements:
+            atomic_reqs_text = "\n\n## Atomic Requirements (link each story to the IDs it satisfies)\n"
+            for req in atomic_requirements:
+                req_id = req.id if hasattr(req, 'id') else req['id']
+                req_text = req.text if hasattr(req, 'text') else req['text']
+                req_type = req.type if hasattr(req, 'type') else req['type']
+                atomic_reqs_text += f"- {req_id} [{req_type}]: {req_text}\n"
 
         epics_text = "\n\n".join([
             f"Epic {e['id']}: {e['name']}\nDescription: {e['description']}"
@@ -343,6 +437,7 @@ Begin your response now with { character:"""
             f"**Content**:\n{c['text']}"
             for c in chunks
         ])
+        valid_chunk_ids = ", ".join(c['id'] for c in chunks)
 
         prompt = f"""Generate detailed User Stories with acceptance criteria for the following EPICs.
 
@@ -351,15 +446,16 @@ EPICs to generate stories for:
 
 BRD Content (chunked by section — reference chunk IDs in source_chunks):
 {chunks_text}
-{gap_fixes_text}
+{gap_fixes_text}{atomic_reqs_text}
 Special Instructions:
 {instructions if instructions else 'None'}
 
 IMPORTANT:
 - Generate stories ONLY for the EPICs listed above, not for any other epics.
 - Start story IDs from story_{story_id_offset + 1} to avoid conflicts with other batches.
-- For each story and acceptance criterion, include source_chunks referencing the BRD chunk IDs used.
-- Generate ALL user stories needed to fully cover each epic — do not leave any requirement uncovered.
+- TRACEABILITY: Every story and every acceptance criterion MUST have source_chunks populated with at least one ID from this exact list: [{valid_chunk_ids}]. Empty source_chunks arrays are not acceptable. Do not invent chunk IDs not in that list.
+- ATOMIC REQUIREMENT LINKAGE: Every story MUST populate atomic_requirement_ids with IDs from the Atomic Requirements list above that this story satisfies. Do not leave it empty.
+- STORY BUDGET (strictly enforced): Generate at most 5 user stories per epic. Prefer fewer, broader stories over many narrow ones. Prioritise the highest-value requirements. If an epic has only 1–2 meaningful requirements, generate 1–2 stories — do not pad. Never exceed 5 stories per epic under any circumstances.
 
 Output must be valid JSON matching this schema:
 {{
@@ -378,7 +474,8 @@ Output must be valid JSON matching this schema:
           "source_chunks": ["chunk_1"]
         }}
       ],
-      "source_chunks": ["chunk_1"]
+      "source_chunks": ["chunk_1"],
+      "atomic_requirement_ids": ["req_1"]
     }}
   ]
 }}
@@ -398,7 +495,7 @@ CRITICAL JSON FORMAT REQUIREMENTS:
 - NO comments inside the JSON
 
 Correct format example:
-{"user_stories": [{"id": "story_1", "epic_id": "epic_1", "title": "Login with credentials", "role": "registered user", "goal": "log in with my username and password", "benefit": "I can access my account securely", "acceptance_criteria": [{"id": "ac_1_1", "text": "Given valid credentials, when I submit the form, then I am redirected to the dashboard", "source_chunks": ["chunk_1"]}], "source_chunks": ["chunk_1"]}]}
+{"user_stories": [{"id": "story_1", "epic_id": "epic_1", "title": "Login with credentials", "role": "registered user", "goal": "log in with my username and password", "benefit": "I can access my account securely", "acceptance_criteria": [{"id": "ac_1_1", "text": "Given valid credentials, when I submit the form, then I am redirected to the dashboard", "source_chunks": ["chunk_1"]}], "source_chunks": ["chunk_1"], "atomic_requirement_ids": ["req_1"]}]}
 
 INCORRECT format (DO NOT DO THIS):
 ```json
@@ -415,12 +512,25 @@ Begin your response now with { character:"""
         instructions: str,
         brd_chunks: Optional[List[Dict[str, Any]]] = None,
         gap_fixes: List[Dict[str, str]] = None,
-        job_id: str = None
+        job_id: str = None,
+        test_id_offset: int = 0
     ) -> Dict[str, Any]:
         """Call B: User Stories → Functional Tests"""
 
         # Build gap fixes context
         gap_fixes_text = self._build_gap_fixes_context(gap_fixes)
+
+        story_req_ids_text = ""
+        all_req_ids = []
+        for s in user_stories:
+            if hasattr(s, 'atomic_requirement_ids') and s.atomic_requirement_ids:
+                all_req_ids.extend(s.atomic_requirement_ids)
+        if all_req_ids:
+            unique_ids = sorted(set(all_req_ids))
+            story_req_ids_text = (
+                f"\n\nAtomic Requirement IDs from source stories: {', '.join(unique_ids)}\n"
+                f"Each test MUST include atomic_requirement_ids listing which of these it validates.\n"
+            )
 
         stories_text = "\n\n".join([
             f"Story {s.id}: {s.title}\n"
@@ -432,7 +542,9 @@ Begin your response now with { character:"""
         ])
 
         chunks_context = ""
+        valid_chunk_ids = ""
         if brd_chunks:
+            valid_chunk_ids = ", ".join(c['id'] for c in brd_chunks)
             chunks_context = "\n\n## Relevant BRD Chunks:\n\n" + "\n\n".join([
                 f"### Chunk {c['id']} - {c.get('section_title', 'Section ' + str(c.get('section_id', 'unknown')))}\n"
                 f"**Section ID**: {c.get('section_id', 'N/A')}\n"
@@ -446,7 +558,7 @@ Begin your response now with { character:"""
 User Stories:
 {stories_text}
 {chunks_context}
-{gap_fixes_text}
+{gap_fixes_text}{story_req_ids_text}
 Special Instructions:
 {instructions if instructions else 'None'}
 
@@ -454,19 +566,21 @@ Output must be valid JSON matching this schema:
 {{
   "functional_tests": [
     {{
-      "id": "test_1",
+      "id": "test_{test_id_offset + 1}",
       "story_id": "story_1",
       "title": "string",
       "objective": "string",
       "preconditions": ["string"],
       "test_steps": ["string"],
       "expected_results": ["string"],
-      "source_chunks": ["chunk_1"]
+      "source_chunks": ["chunk_1"],
+      "atomic_requirement_ids": ["req_1"]
     }}
   ]
 }}
 
-Each test should be detailed, specific, and cover the acceptance criteria.
+TEST BUDGET (strictly enforced): Generate at most 3 functional tests per user story — typically one happy path and one or two edge cases or error conditions. Do not generate exhaustive coverage. If a story is straightforward, 2 tests is correct. Never exceed 3 tests per story.
+TRACEABILITY: Every functional test MUST have source_chunks populated with at least one chunk ID. {"Valid chunk IDs: " + valid_chunk_ids + ". " if valid_chunk_ids else ""}Empty source_chunks arrays are not acceptable.
 """
 
         system_prompt = """You are an expert QA engineer.
@@ -496,7 +610,8 @@ Begin your response now with { character:"""
         functional_tests: List[FunctionalTest] = None,
         instructions: str = "",
         brd_chunks: Optional[List[Dict[str, Any]]] = None,
-        job_id: str = None
+        job_id: str = None,
+        gherkin_id_offset: int = 0
     ) -> Dict[str, Any]:
         """Call C: User Stories + Functional Tests + BRD chunks → Gherkin scenarios"""
 
@@ -508,14 +623,24 @@ Begin your response now with { character:"""
             for s in user_stories
         ])
 
-        # Include functional tests as context for Gherkin generation
+        # Include functional test titles only — enough for Gherkin context without bloating the prompt
         functional_tests_text = ""
         if functional_tests:
-            functional_tests_text = "\n\nFunctional Tests (for reference):\n"
+            functional_tests_text = "\n\nFunctional Tests (titles for reference):\n"
             for test in functional_tests:
-                functional_tests_text += f"\n{test.title}:\n"
-                functional_tests_text += f"Objective: {test.objective}\n"
-                functional_tests_text += f"Steps: {', '.join(test.test_steps[:3])}{'...' if len(test.test_steps) > 3 else ''}\n"
+                functional_tests_text += f"- [{test.story_id}] {test.title}\n"
+
+        story_req_ids_text = ""
+        all_req_ids = []
+        for s in user_stories:
+            if hasattr(s, 'atomic_requirement_ids') and s.atomic_requirement_ids:
+                all_req_ids.extend(s.atomic_requirement_ids)
+        if all_req_ids:
+            unique_ids = sorted(set(all_req_ids))
+            story_req_ids_text = (
+                f"\n\nAtomic Requirement IDs from source stories: {', '.join(unique_ids)}\n"
+                f"Each scenario MUST include atomic_requirement_ids listing which of these it covers.\n"
+            )
 
         # Include relevant BRD chunks for domain grounding
         chunks_context = ""
@@ -529,7 +654,7 @@ Begin your response now with { character:"""
 
 User Stories:
 {stories_text}
-{functional_tests_text}
+{functional_tests_text}{story_req_ids_text}
 {chunks_context}
 
 Special Instructions:
@@ -539,14 +664,15 @@ Output must be valid JSON matching this schema:
 {{
   "gherkin_tests": [
     {{
-      "id": "gherkin_1",
+      "id": "gherkin_{gherkin_id_offset + 1}",
       "story_id": "story_1",
       "feature_name": "string",
       "scenario_name": "string",
       "given": ["string"],
       "when": ["string"],
       "then": ["string"],
-      "source_chunks": ["chunk_1"]
+      "source_chunks": ["chunk_1"],
+      "atomic_requirement_ids": ["req_1"]
     }}
   ]
 }}
@@ -595,7 +721,7 @@ Begin your response now with { character:"""
 
         # Include BRD sections (summarized) — entities are often described in prose, not just tables
         sections_text = "\n\n".join([
-            f"## {s['title']}\n{s['text'][:600]}"  # 600 chars per section to control tokens
+            f"## {s['title']}\n{s['text'][:1500]}"  # 1500 chars per section
             for s in brd_data.get('sections', [])
         ])
 

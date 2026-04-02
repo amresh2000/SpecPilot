@@ -57,6 +57,7 @@ class UserStory(BaseModel):
     source_chunks: Optional[List[str]] = None
     edited_at: Optional[datetime] = None
     regeneration_needed: bool = False
+    atomic_requirement_ids: Optional[List[str]] = None
 
 
 class Epic(BaseModel):
@@ -75,6 +76,7 @@ class FunctionalTest(BaseModel):
     test_steps: List[str]
     expected_results: List[str]
     source_chunks: Optional[List[str]] = None
+    atomic_requirement_ids: Optional[List[str]] = None
     regenerated_at: Optional[datetime] = None
 
 
@@ -87,6 +89,7 @@ class GherkinScenario(BaseModel):
     when: List[str]
     then: List[str]
     source_chunks: Optional[List[str]] = None
+    atomic_requirement_ids: Optional[List[str]] = None
     regenerated_at: Optional[datetime] = None
 
 
@@ -132,8 +135,47 @@ class GapFix(BaseModel):
     final_text: Optional[str] = None
 
 
+# Requirement Map Models — must be defined before GenerationResults
+class AtomicRequirementType(str, Enum):
+    FUNCTIONAL = "functional"
+    BUSINESS_RULE = "business_rule"
+    EXCEPTION = "exception"
+    VALIDATION = "validation"
+    NFR = "nfr"
+    CONSTRAINT = "constraint"
+
+
+class AtomicRequirementStatus(str, Enum):
+    GENERATED = "generated"
+    REVIEWED = "reviewed"
+    EDITED = "edited"
+    OUT_OF_SCOPE = "out_of_scope"
+
+
+class AtomicRequirement(BaseModel):
+    id: str  # "req_1"
+    chunk_id: str
+    text: str
+    type: AtomicRequirementType
+    derived_from_table: bool = False
+    status: AtomicRequirementStatus = AtomicRequirementStatus.GENERATED
+    edited_at: Optional[datetime] = None
+
+
+class RequirementChunk(BaseModel):
+    chunk_id: str
+    title: str
+    semantic_type: str  # "functional_flow" | "business_rules" | "nfr" | "constraint" | "mixed"
+    summary: str
+    confidence: float  # 0.0–1.0
+    has_table: bool = False
+    atomic_requirement_ids: List[str] = Field(default_factory=list)
+
+
 class GenerationResults(BaseModel):
     project_name: Optional[str] = None
+    requirement_chunks: List[RequirementChunk] = Field(default_factory=list)
+    atomic_requirements: List[AtomicRequirement] = Field(default_factory=list)
     epics: List[Epic] = []
     user_stories: List[UserStory] = []
     functional_tests: List[FunctionalTest] = []
@@ -146,6 +188,7 @@ class GenerationResults(BaseModel):
 
 class PipelineStage(str, Enum):
     VALIDATION = "validation"
+    REQUIREMENT_MAP = "requirement_map"
     EPICS = "epics"
     FUNCTIONAL_TESTS = "functional_tests"
     GHERKIN_TESTS = "gherkin_tests"
@@ -203,6 +246,12 @@ class UpdateGapFixRequest(BaseModel):
     gap_id: str
     action: str  # "accepted" | "edited" | "rejected"
     final_text: Optional[str] = None
+
+
+class UpdateAtomicRequirementRequest(BaseModel):
+    text: Optional[str] = None
+    type: Optional[AtomicRequirementType] = None
+    status: Optional[AtomicRequirementStatus] = None
 
 
 class ProceedToStageRequest(BaseModel):

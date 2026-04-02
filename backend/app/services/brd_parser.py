@@ -54,6 +54,21 @@ class BRDParser:
         """
         return len(section_id.split('.'))
 
+    def _is_pseudo_heading(self, para, text: str) -> bool:
+        """
+        Detect if a paragraph acts as a heading despite lacking a Heading style.
+        Conservative heuristics: short + (all-bold OR all-caps), no trailing period, not a list item.
+        """
+        if not text or len(text) > 100 or text.endswith('.'):
+            return False
+        style_name = para.style.name.lower()
+        if style_name.startswith('list') or text[0] in ('•', '-', '*', '–'):
+            return False
+        if text.isupper() and len(text) > 3:
+            return True
+        runs = [r for r in para.runs if r.text.strip()]
+        return bool(runs and all(r.bold for r in runs))
+
     def parse_docx(self, file_path: str) -> Dict[str, Any]:
         """Parse .docx file and extract sections, tables, and text"""
         doc = Document(file_path)
@@ -66,56 +81,120 @@ class BRDParser:
         chunk_id = 0
         section_paragraphs = []
 
-        # Extract paragraphs and sections
-        for para in doc.paragraphs:
-            text = para.text.strip()
-            if not text:
-                continue
+        # Index paragraphs and tables for body-order iteration
+        para_list = list(doc.paragraphs)
+        table_list = list(doc.tables)
+        para_idx = 0
+        table_idx = 0
 
-            raw_text.append(text)
+        # Iterate body children in document order — interleaves paragraphs and tables
+        # so tables are chunked at their actual position, not appended at the end.
+        for child in doc.element.body:
+            tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
 
-            # Check if this is a heading
-            if para.style.name.startswith('Heading'):
-                # If we have a previous section with content, create its chunk
-                if current_section and section_paragraphs:
-                    chunk_id += 1
-                    section_content = "\n\n".join(section_paragraphs)
-                    chunk = {
-                        "id": f"chunk_{chunk_id}",
-                        "type": "section",
-                        "section_id": current_section["id"],
-                        "section_title": current_section["title"],
-                        "heading_level": self._get_heading_level(current_section["id"]),
-                        "parent_section_id": self._get_parent_section_id(current_section["id"]),
-                        "text": section_content
+            if tag == 'p' and para_idx < len(para_list):
+                para = para_list[para_idx]
+                para_idx += 1
+                text = para.text.strip()
+                if not text:
+                    continue
+
+                raw_text.append(text)
+
+                is_heading = para.style.name.startswith('Heading')
+                is_pseudo = not is_heading and self._is_pseudo_heading(para, text)
+
+                if is_heading or is_pseudo:
+                    # Finalize previous section chunk before starting a new one
+                    if current_section and section_paragraphs:
+                        chunk_id += 1
+                        section_content = "\n\n".join(section_paragraphs)
+                        chunk = {
+                            "id": f"chunk_{chunk_id}",
+                            "type": "section",
+                            "section_id": current_section["id"],
+                            "section_title": current_section["title"],
+                            "heading_level": self._get_heading_level(current_section["id"]),
+                            "parent_section_id": self._get_parent_section_id(current_section["id"]),
+                            "text": section_content
+                        }
+                        chunks.append(chunk)
+                        current_section["chunk_ids"].append(f"chunk_{chunk_id}")
+                        section_paragraphs = []
+
+                    section_match = re.match(r'^(\d+(?:\.\d+)*)\s+(.*)', text)
+                    if section_match:
+                        section_id = section_match.group(1)
+                        title = section_match.group(2)
+                    else:
+                        section_id = f"section_{len(sections) + 1}"
+                        title = text
+
+                    current_section = {
+                        "id": section_id,
+                        "title": title,
+                        "text": "",
+                        "chunk_ids": []
                     }
-                    chunks.append(chunk)
-                    current_section["chunk_ids"].append(f"chunk_{chunk_id}")
-                    section_paragraphs = []
-
-                # Extract section number if present
-                section_match = re.match(r'^(\d+(?:\.\d+)*)\s+(.*)', text)
-                if section_match:
-                    section_id = section_match.group(1)
-                    title = section_match.group(2)
+                    sections.append(current_section)
                 else:
-                    section_id = f"section_{len(sections) + 1}"
-                    title = text
-
-                current_section = {
-                    "id": section_id,
-                    "title": title,
-                    "text": "",
-                    "chunk_ids": []
-                }
-                sections.append(current_section)
-            else:
-                # Regular paragraph - accumulate for section chunk
-                if current_section:
+                    # Regular paragraph — create implicit intro section if no heading seen yet
+                    if not current_section:
+                        current_section = {
+                            "id": "intro",
+                            "title": "Introduction",
+                            "text": "",
+                            "chunk_ids": []
+                        }
+                        sections.append(current_section)
                     current_section["text"] += text + "\n"
                     section_paragraphs.append(text)
 
-        # Create chunk for the final section if it has content
+            elif tag == 'tbl' and table_idx < len(table_list):
+                table = table_list[table_idx]
+                table_idx += 1
+
+                if len(table.rows) < 2:
+                    continue
+
+                headers = [cell.text.strip() for cell in table.rows[0].cells]
+                if not any(headers):
+                    continue
+
+                rows = []
+                for row in table.rows[1:]:
+                    row_data = {}
+                    for idx, cell in enumerate(row.cells):
+                        if idx < len(headers) and headers[idx]:
+                            row_data[headers[idx]] = cell.text.strip()
+                    if row_data:
+                        rows.append(row_data)
+
+                table_data = {
+                    "table_id": f"table_{table_idx}",
+                    "section_id": current_section["id"] if current_section else None,
+                    "headers": headers,
+                    "rows": rows
+                }
+                tables.append(table_data)
+
+                # Create table chunk inline at its actual document position
+                chunk_id += 1
+                chunk_text = f"Table: {', '.join(headers)}\n"
+                for row in rows:
+                    chunk_text += str(row) + "\n"
+                chunks.append({
+                    "id": f"chunk_{chunk_id}",
+                    "type": "table",
+                    "section_id": current_section["id"] if current_section else None,
+                    "section_title": current_section["title"] if current_section else None,
+                    "heading_level": self._get_heading_level(current_section["id"]) if current_section else None,
+                    "parent_section_id": self._get_parent_section_id(current_section["id"]) if current_section else None,
+                    "text": chunk_text,
+                    "table_ref": table_data["table_id"]
+                })
+
+        # Finalize the last section
         if current_section and section_paragraphs:
             chunk_id += 1
             section_content = "\n\n".join(section_paragraphs)
@@ -130,52 +209,6 @@ class BRDParser:
             }
             chunks.append(chunk)
             current_section["chunk_ids"].append(f"chunk_{chunk_id}")
-
-        # Extract tables
-        for table_idx, table in enumerate(doc.tables):
-            if len(table.rows) < 2:
-                continue  # Skip tables without headers
-
-            # Extract headers from first row
-            headers = [cell.text.strip() for cell in table.rows[0].cells]
-
-            # Skip if headers are empty
-            if not any(headers):
-                continue
-
-            # Extract rows
-            rows = []
-            for row in table.rows[1:]:
-                row_data = {}
-                for idx, cell in enumerate(row.cells):
-                    if idx < len(headers) and headers[idx]:
-                        row_data[headers[idx]] = cell.text.strip()
-                if row_data:
-                    rows.append(row_data)
-
-            table_data = {
-                "table_id": f"table_{table_idx + 1}",
-                "section_id": current_section["id"] if current_section else None,
-                "headers": headers,
-                "rows": rows
-            }
-            tables.append(table_data)
-
-            # Create chunk for table with full data (not truncated)
-            chunk_id += 1
-            chunk_text = f"Table: {', '.join(headers)}\n"
-            for row in rows:  # Include ALL rows, not just first 3
-                chunk_text += str(row) + "\n"
-            chunks.append({
-                "id": f"chunk_{chunk_id}",
-                "type": "table",
-                "section_id": current_section["id"] if current_section else None,
-                "section_title": current_section["title"] if current_section else None,
-                "heading_level": self._get_heading_level(current_section["id"]) if current_section else None,
-                "parent_section_id": self._get_parent_section_id(current_section["id"]) if current_section else None,
-                "text": chunk_text,
-                "table_ref": table_data["table_id"]
-            })
 
         return {
             "sections": sections,
@@ -204,8 +237,16 @@ class BRDParser:
 
             # Check if line is a section header (starts with numbers like 1., 1.1, 1.1.1)
             section_match = re.match(r'^(\d+(?:\.\d+)*\.?)\s+(.*)', line)
+            # Detect ALL CAPS lines as headings for txt files without numbered sections
+            is_caps_heading = (
+                not section_match
+                and line.isupper()
+                and 3 < len(line) <= 100
+                and not line.endswith('.')
+                and line[0] not in ('•', '-', '*', '–')
+            )
 
-            if section_match:
+            if section_match or is_caps_heading:
                 # If we have a previous section with content, create its chunk
                 if current_section and section_lines:
                     chunk_id += 1
@@ -223,8 +264,12 @@ class BRDParser:
                     current_section["chunk_ids"].append(f"chunk_{chunk_id}")
                     section_lines = []
 
-                section_id = section_match.group(1).rstrip('.')
-                title = section_match.group(2)
+                if section_match:
+                    section_id = section_match.group(1).rstrip('.')
+                    title = section_match.group(2)
+                else:
+                    section_id = f"section_{len(sections) + 1}"
+                    title = line
 
                 current_section = {
                     "id": section_id,

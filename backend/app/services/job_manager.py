@@ -43,6 +43,13 @@ class Job:
     def mark_failed(self, error: str):
         self.status = JobStatus.FAILED
         self.error = error
+        # Mark the current running stage as failed so the frontend can detect the failure
+        if self.current_stage:
+            for state in self.stage_history:
+                if state.stage == self.current_stage and state.status == StepStatus.RUNNING:
+                    state.status = StepStatus.FAILED
+                    state.completed_at = datetime.now()
+                    break
 
     def advance_stage(self, next_stage: PipelineStage):
         """Advance to next pipeline stage"""

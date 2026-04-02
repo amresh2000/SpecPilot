@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from './ui/Card';
-import { Edit2, Check, X, Plus, Trash2 } from 'lucide-react';
+import { Input } from './ui/Input';
+import { Edit2, Check, X, Plus, Trash2, Loader2 } from 'lucide-react';
 import { useToast } from './ui/ToastContainer';
 import { api } from '../lib/api';
+import { cn } from '../lib/utils';
 import type { GherkinScenario } from '../types';
 
 interface EditableGherkinTestProps {
@@ -11,106 +13,97 @@ interface EditableGherkinTestProps {
   onUpdate: () => void;
 }
 
+// ── Shared editable list helper ───────────────────────────────────────────────
+
+const EditableClauseList: React.FC<{
+  keyword: string;
+  keywordColor: string;
+  items: string[];
+  newValue: string;
+  onNewValueChange: (v: string) => void;
+  onAdd: () => void;
+  onUpdate: (i: number, v: string) => void;
+  onRemove: (i: number) => void;
+}> = ({ keyword, keywordColor, items, newValue, onNewValueChange, onAdd, onUpdate, onRemove }) => (
+  <div className="space-y-1.5">
+    {items.map((item, i) => (
+      <div key={i} className="flex items-center gap-2">
+        <span className={`text-xs font-bold shrink-0 w-10 ${keywordColor}`}>{keyword}</span>
+        <Input
+          value={item}
+          onChange={e => onUpdate(i, e.target.value)}
+          className="flex-1 text-xs h-7"
+        />
+        <button
+          onClick={() => onRemove(i)}
+          className="p-1 text-neutral-400 hover:text-red-500 rounded transition-colors shrink-0"
+          aria-label={`Remove ${keyword} statement`}
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    ))}
+    <div className="flex items-center gap-2">
+      <span className={`text-xs font-bold shrink-0 w-10 opacity-50 ${keywordColor}`}>{keyword}</span>
+      <Input
+        value={newValue}
+        onChange={e => onNewValueChange(e.target.value)}
+        onKeyDown={e => e.key === 'Enter' && onAdd()}
+        placeholder={`Add ${keyword.toLowerCase()} statement…`}
+        className="flex-1 text-xs h-7"
+      />
+      <button
+        onClick={onAdd}
+        className="p-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 shrink-0"
+        aria-label={`Add ${keyword} statement`}
+      >
+        <Plus className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  </div>
+);
+
+// ── Keyword token for display mode ────────────────────────────────────────────
+
+const Keyword: React.FC<{ word: string; color: string }> = ({ word, color }) => (
+  <span className={`font-bold text-xs mr-1 ${color}`}>{word}</span>
+);
+
+// ── Main component ────────────────────────────────────────────────────────────
+
 export const EditableGherkinTest: React.FC<EditableGherkinTestProps> = ({ scenario, jobId, onUpdate }) => {
-  const [isEditMode, setIsEditMode] = useState(false);
-  const [editedFeatureName, setEditedFeatureName] = useState(scenario.feature_name);
+  const [isEditMode,         setIsEditMode]         = useState(false);
+  const [editedFeatureName,  setEditedFeatureName]  = useState(scenario.feature_name);
   const [editedScenarioName, setEditedScenarioName] = useState(scenario.scenario_name);
-  const [editedGiven, setEditedGiven] = useState<string[]>(scenario.given);
-  const [editedWhen, setEditedWhen] = useState<string[]>(scenario.when);
-  const [editedThen, setEditedThen] = useState<string[]>(scenario.then);
-  const [newGiven, setNewGiven] = useState('');
-  const [newWhen, setNewWhen] = useState('');
-  const [newThen, setNewThen] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const toast = useToast();
+  const [editedGiven,        setEditedGiven]        = useState<string[]>(scenario.given);
+  const [editedWhen,         setEditedWhen]         = useState<string[]>(scenario.when);
+  const [editedThen,         setEditedThen]         = useState<string[]>(scenario.then);
+  const [newGiven,           setNewGiven]           = useState('');
+  const [newWhen,            setNewWhen]            = useState('');
+  const [newThen,            setNewThen]            = useState('');
+  const [isSaving,           setIsSaving]           = useState(false);
+  const [isDeleting,         setIsDeleting]         = useState(false);
+  const toast     = useToast();
+  const editBtnRef = useRef<HTMLButtonElement>(null);
+  const firstInputRef = useRef<HTMLInputElement>(null);
 
-  const handleAddGiven = () => {
-    if (newGiven.trim()) {
-      setEditedGiven([...editedGiven, newGiven.trim()]);
-      setNewGiven('');
-    }
-  };
+  const makeListHandlers = (
+    list: string[],
+    setList: React.Dispatch<React.SetStateAction<string[]>>,
+    newVal: string,
+    setNewVal: React.Dispatch<React.SetStateAction<string>>,
+  ) => ({
+    items:    list,
+    newValue: newVal,
+    onNewValueChange: setNewVal,
+    onAdd:    () => { if (newVal.trim()) { setList(p => [...p, newVal.trim()]); setNewVal(''); } },
+    onUpdate: (i: number, v: string) => setList(p => p.map((x, idx) => idx === i ? v : x)),
+    onRemove: (i: number) => setList(p => p.filter((_, idx) => idx !== i)),
+  });
 
-  const handleRemoveGiven = (index: number) => {
-    setEditedGiven(editedGiven.filter((_, i) => i !== index));
-  };
-
-  const handleUpdateGiven = (index: number, value: string) => {
-    const updated = [...editedGiven];
-    updated[index] = value;
-    setEditedGiven(updated);
-  };
-
-  const handleAddWhen = () => {
-    if (newWhen.trim()) {
-      setEditedWhen([...editedWhen, newWhen.trim()]);
-      setNewWhen('');
-    }
-  };
-
-  const handleRemoveWhen = (index: number) => {
-    setEditedWhen(editedWhen.filter((_, i) => i !== index));
-  };
-
-  const handleUpdateWhen = (index: number, value: string) => {
-    const updated = [...editedWhen];
-    updated[index] = value;
-    setEditedWhen(updated);
-  };
-
-  const handleAddThen = () => {
-    if (newThen.trim()) {
-      setEditedThen([...editedThen, newThen.trim()]);
-      setNewThen('');
-    }
-  };
-
-  const handleRemoveThen = (index: number) => {
-    setEditedThen(editedThen.filter((_, i) => i !== index));
-  };
-
-  const handleUpdateThen = (index: number, value: string) => {
-    const updated = [...editedThen];
-    updated[index] = value;
-    setEditedThen(updated);
-  };
-
-  const handleSave = async () => {
-    if (!editedFeatureName.trim() || !editedScenarioName.trim()) {
-      toast.error('Feature name and scenario name are required');
-      return;
-    }
-
-    const validGiven = editedGiven.filter((g) => g.trim() !== '');
-    const validWhen = editedWhen.filter((w) => w.trim() !== '');
-    const validThen = editedThen.filter((t) => t.trim() !== '');
-
-    if (validGiven.length === 0 || validWhen.length === 0 || validThen.length === 0) {
-      toast.error('At least one Given, When, and Then statement are required');
-      return;
-    }
-
-    setIsSaving(true);
-    try {
-      await api.updateGherkinTest(
-        jobId,
-        scenario.id,
-        editedFeatureName.trim(),
-        editedScenarioName.trim(),
-        validGiven,
-        validWhen,
-        validThen
-      );
-
-      toast.success('Gherkin test updated successfully');
-      setIsEditMode(false);
-      onUpdate();
-    } catch (error) {
-      toast.error('Failed to update Gherkin test');
-    } finally {
-      setIsSaving(false);
-    }
+  const handleEnterEdit = () => {
+    setIsEditMode(true);
+    setTimeout(() => firstInputRef.current?.focus(), 50);
   };
 
   const handleCancel = () => {
@@ -119,25 +112,45 @@ export const EditableGherkinTest: React.FC<EditableGherkinTestProps> = ({ scenar
     setEditedGiven(scenario.given);
     setEditedWhen(scenario.when);
     setEditedThen(scenario.then);
-    setNewGiven('');
-    setNewWhen('');
-    setNewThen('');
+    setNewGiven(''); setNewWhen(''); setNewThen('');
     setIsEditMode(false);
+    editBtnRef.current?.focus();
+  };
+
+  const handleSave = async () => {
+    if (!editedFeatureName.trim() || !editedScenarioName.trim()) {
+      toast.error('Feature name and scenario name are required');
+      return;
+    }
+    const vGiven = editedGiven.filter(s => s.trim());
+    const vWhen  = editedWhen.filter(s => s.trim());
+    const vThen  = editedThen.filter(s => s.trim());
+    if (!vGiven.length || !vWhen.length || !vThen.length) {
+      toast.error('At least one Given, When, and Then statement are required');
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await api.updateGherkinTest(jobId, scenario.id, editedFeatureName.trim(), editedScenarioName.trim(), vGiven, vWhen, vThen);
+      toast.success('Gherkin test updated');
+      setIsEditMode(false);
+      onUpdate();
+    } catch {
+      toast.error('Failed to update Gherkin test');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleDelete = async () => {
-    if (!confirm(`Are you sure you want to delete Gherkin scenario "${scenario.scenario_name}"?`)) {
-      return;
-    }
-
+    if (!confirm(`Delete Gherkin scenario "${scenario.scenario_name}"?`)) return;
     setIsDeleting(true);
     try {
       await api.deleteTest(jobId, scenario.id, 'gherkin');
-      toast.success('Gherkin test deleted successfully');
+      toast.success('Gherkin test deleted');
       onUpdate();
-    } catch (error) {
+    } catch {
       toast.error('Failed to delete Gherkin test');
-    } finally {
       setIsDeleting(false);
     }
   };
@@ -146,232 +159,113 @@ export const EditableGherkinTest: React.FC<EditableGherkinTestProps> = ({ scenar
     <Card>
       <CardHeader>
         <div className="flex items-start justify-between">
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             {isEditMode ? (
-              <div className="space-y-2">
+              <div className="space-y-2 pr-2">
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Feature Name</label>
-                  <input
-                    type="text"
-                    value={editedFeatureName}
-                    onChange={(e) => setEditedFeatureName(e.target.value)}
-                    className="w-full font-semibold text-lg p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Feature name"
-                  />
+                  <label className="block text-xs font-medium text-neutral-600 mb-1">Feature Name</label>
+                  <Input ref={firstInputRef} value={editedFeatureName} onChange={e => setEditedFeatureName(e.target.value)} placeholder="Feature name" />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Scenario Name</label>
-                  <input
-                    type="text"
-                    value={editedScenarioName}
-                    onChange={(e) => setEditedScenarioName(e.target.value)}
-                    className="w-full font-semibold p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Scenario name"
-                  />
+                  <label className="block text-xs font-medium text-neutral-600 mb-1">Scenario Name</label>
+                  <Input value={editedScenarioName} onChange={e => setEditedScenarioName(e.target.value)} placeholder="Scenario name" />
                 </div>
               </div>
             ) : (
-              <CardTitle className="text-lg">Feature: {scenario.feature_name}</CardTitle>
+              <>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-neutral-400 mb-0.5">Feature</p>
+                <CardTitle className="text-sm truncate">{scenario.feature_name}</CardTitle>
+              </>
             )}
           </div>
           {!isEditMode && (
-            <div className="flex gap-2 ml-2">
+            <div className="flex gap-1 ml-3 shrink-0">
               <button
-                onClick={() => setIsEditMode(true)}
+                ref={editBtnRef}
+                onClick={handleEnterEdit}
                 disabled={isDeleting}
-                className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors disabled:opacity-50"
-                title="Edit Gherkin test"
+                className="p-1.5 text-neutral-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors disabled:opacity-50"
+                aria-label="Edit Gherkin test"
               >
-                <Edit2 className="w-4 h-4" />
+                <Edit2 className="w-3.5 h-3.5" />
               </button>
               <button
                 onClick={handleDelete}
                 disabled={isDeleting}
-                className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50"
-                title="Delete Gherkin test"
+                className="p-1.5 text-neutral-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors disabled:opacity-50"
+                aria-label="Delete Gherkin test"
               >
-                <Trash2 className={`w-4 h-4 ${isDeleting ? 'animate-pulse' : ''}`} />
+                {isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
               </button>
             </div>
           )}
         </div>
       </CardHeader>
+
       <CardContent>
         {isEditMode ? (
           <div className="space-y-4">
-            {/* Given Statements */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Given Statements</label>
-              <div className="space-y-2">
-                {editedGiven.map((given, index) => (
-                  <div key={index} className="flex items-start gap-2">
-                    <span className="text-sm text-gray-500 mt-2 flex-shrink-0">Given</span>
-                    <input
-                      type="text"
-                      value={given}
-                      onChange={(e) => handleUpdateGiven(index, e.target.value)}
-                      className="flex-1 p-2 border rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                    <button
-                      onClick={() => handleRemoveGiven(index)}
-                      className="p-2 text-red-600 hover:bg-red-50 rounded"
-                      title="Remove"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
-                <div className="flex gap-2">
-                  <span className="text-sm text-gray-500 mt-2 flex-shrink-0">Given</span>
-                  <input
-                    type="text"
-                    value={newGiven}
-                    onChange={(e) => setNewGiven(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleAddGiven()}
-                    placeholder="Add new Given statement..."
-                    className="flex-1 p-2 border rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                  <button
-                    onClick={handleAddGiven}
-                    className="flex items-center gap-1 px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
-                    title="Add"
-                  >
-                    <Plus className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
+              <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-2">Given</p>
+              <EditableClauseList keyword="Given" keywordColor="text-emerald-600"
+                {...makeListHandlers(editedGiven, setEditedGiven, newGiven, setNewGiven)} />
             </div>
-
-            {/* When Statements */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">When Statements</label>
-              <div className="space-y-2">
-                {editedWhen.map((when, index) => (
-                  <div key={index} className="flex items-start gap-2">
-                    <span className="text-sm text-gray-500 mt-2 flex-shrink-0">When</span>
-                    <input
-                      type="text"
-                      value={when}
-                      onChange={(e) => handleUpdateWhen(index, e.target.value)}
-                      className="flex-1 p-2 border rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                    <button
-                      onClick={() => handleRemoveWhen(index)}
-                      className="p-2 text-red-600 hover:bg-red-50 rounded"
-                      title="Remove"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
-                <div className="flex gap-2">
-                  <span className="text-sm text-gray-500 mt-2 flex-shrink-0">When</span>
-                  <input
-                    type="text"
-                    value={newWhen}
-                    onChange={(e) => setNewWhen(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleAddWhen()}
-                    placeholder="Add new When statement..."
-                    className="flex-1 p-2 border rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                  <button
-                    onClick={handleAddWhen}
-                    className="flex items-center gap-1 px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
-                    title="Add"
-                  >
-                    <Plus className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
+              <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-2">When</p>
+              <EditableClauseList keyword="When" keywordColor="text-amber-600"
+                {...makeListHandlers(editedWhen, setEditedWhen, newWhen, setNewWhen)} />
             </div>
-
-            {/* Then Statements */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Then Statements</label>
-              <div className="space-y-2">
-                {editedThen.map((then, index) => (
-                  <div key={index} className="flex items-start gap-2">
-                    <span className="text-sm text-gray-500 mt-2 flex-shrink-0">Then</span>
-                    <input
-                      type="text"
-                      value={then}
-                      onChange={(e) => handleUpdateThen(index, e.target.value)}
-                      className="flex-1 p-2 border rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                    <button
-                      onClick={() => handleRemoveThen(index)}
-                      className="p-2 text-red-600 hover:bg-red-50 rounded"
-                      title="Remove"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
-                <div className="flex gap-2">
-                  <span className="text-sm text-gray-500 mt-2 flex-shrink-0">Then</span>
-                  <input
-                    type="text"
-                    value={newThen}
-                    onChange={(e) => setNewThen(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleAddThen()}
-                    placeholder="Add new Then statement..."
-                    className="flex-1 p-2 border rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                  <button
-                    onClick={handleAddThen}
-                    className="flex items-center gap-1 px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
-                    title="Add"
-                  >
-                    <Plus className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
+              <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-2">Then</p>
+              <EditableClauseList keyword="Then" keywordColor="text-indigo-500"
+                {...makeListHandlers(editedThen, setEditedThen, newThen, setNewThen)} />
             </div>
-
-            {/* Action Buttons */}
-            <div className="flex gap-2 pt-2">
+            <div className="flex gap-2 pt-1">
               <button
                 onClick={handleSave}
                 disabled={isSaving}
-                className="flex items-center gap-1 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 text-sm"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white rounded text-xs hover:bg-emerald-700 disabled:opacity-50"
               >
-                <Check className="w-4 h-4" />
-                {isSaving ? 'Saving...' : 'Save Changes'}
+                {isSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                {isSaving ? 'Saving…' : 'Save Changes'}
               </button>
               <button
                 onClick={handleCancel}
                 disabled={isSaving}
-                className="flex items-center gap-1 px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 disabled:opacity-50 text-sm"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-100 text-neutral-700 rounded text-xs hover:bg-neutral-200 disabled:opacity-50"
               >
-                <X className="w-4 h-4" />
-                Cancel
+                <X className="w-3 h-3" /> Cancel
               </button>
             </div>
           </div>
         ) : (
-          <pre className="bg-gray-50 p-4 rounded-md text-sm overflow-x-auto">
-            <div className="font-semibold">Scenario: {scenario.scenario_name}</div>
-            {scenario.given.map((g, idx) => (
-              <div key={idx} className="ml-2">
-                Given {g}
-              </div>
-            ))}
-            {scenario.when.map((w, idx) => (
-              <div key={idx} className="ml-2">
-                When {w}
-              </div>
-            ))}
-            {scenario.then.map((t, idx) => (
-              <div key={idx} className="ml-2">
-                Then {t}
-              </div>
-            ))}
-            {scenario.source_chunks && scenario.source_chunks.length > 0 && (
-              <div className="mt-3 text-xs text-gray-500 border-t pt-2">
-                Source chunks: {scenario.source_chunks.length} references
-              </div>
-            )}
-          </pre>
+          /* ── Display mode: code-block style ── */
+          <div className="rounded-lg bg-neutral-900 px-4 py-3 font-mono text-xs leading-6 overflow-x-auto">
+            <p className="text-neutral-400 mb-1">
+              <span className="text-violet-400 font-semibold">Scenario:</span>{' '}
+              <span className="text-neutral-100">{scenario.scenario_name}</span>
+            </p>
+            <div className="space-y-0.5 mt-2">
+              {scenario.given.map((g, i) => (
+                <p key={i} className="text-neutral-300">
+                  <Keyword word={i === 0 ? 'Given' : 'And'} color="text-emerald-400" />
+                  {g}
+                </p>
+              ))}
+              {scenario.when.map((w, i) => (
+                <p key={i} className="text-neutral-300">
+                  <Keyword word={i === 0 ? 'When' : 'And'} color="text-amber-400" />
+                  {w}
+                </p>
+              ))}
+              {scenario.then.map((t, i) => (
+                <p key={i} className="text-neutral-300">
+                  <Keyword word={i === 0 ? 'Then' : 'And'} color="text-indigo-400" />
+                  {t}
+                </p>
+              ))}
+            </div>
+          </div>
         )}
       </CardContent>
     </Card>

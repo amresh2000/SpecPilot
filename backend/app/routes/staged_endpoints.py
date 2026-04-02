@@ -12,6 +12,7 @@ GENERATED_DIR = Path("generated")
 
 STAGE_ORDER = [
     PipelineStage.VALIDATION,
+    PipelineStage.REQUIREMENT_MAP,
     PipelineStage.EPICS,
     PipelineStage.FUNCTIONAL_TESTS,
     PipelineStage.GHERKIN_TESTS,
@@ -71,7 +72,9 @@ async def proceed_to_stage(job_id: str, request: ProceedToStageRequest, backgrou
                 if not job.brd_data:
                     await pipeline._parse_brd()
 
-                if stage == PipelineStage.EPICS:
+                if stage == PipelineStage.REQUIREMENT_MAP:
+                    await pipeline._generate_requirement_map()
+                elif stage == PipelineStage.EPICS:
                     await pipeline._generate_epics_and_stories()
                 elif stage == PipelineStage.FUNCTIONAL_TESTS:
                     await pipeline._generate_functional_tests()

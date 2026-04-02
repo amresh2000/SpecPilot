@@ -3,11 +3,57 @@ export type StepStatus = 'pending' | 'running' | 'completed' | 'failed';
 
 export type PipelineStage =
   | 'validation'
+  | 'requirement_map'
   | 'epics'
   | 'functional_tests'
   | 'gherkin_tests'
   | 'data_model'
   | 'completed';
+
+export type AtomicRequirementType =
+  | 'functional'
+  | 'business_rule'
+  | 'exception'
+  | 'validation'
+  | 'nfr'
+  | 'constraint';
+
+export type AtomicRequirementStatus =
+  | 'generated'
+  | 'reviewed'
+  | 'edited'
+  | 'out_of_scope';
+
+export interface AtomicRequirement {
+  id: string;
+  chunk_id: string;
+  text: string;
+  type: AtomicRequirementType;
+  derived_from_table: boolean;
+  status: AtomicRequirementStatus;
+  edited_at?: string;
+}
+
+export interface RequirementChunk {
+  chunk_id: string;
+  title: string;
+  semantic_type: string;
+  summary: string;
+  confidence: number;
+  has_table: boolean;
+  atomic_requirement_ids: string[];
+}
+
+export interface BrdChunk {
+  id: string;
+  type: 'section' | 'table';
+  section_id: string;
+  section_title: string;
+  heading_level: number;
+  parent_section_id: string | null;
+  text: string;
+  table_ref?: string;
+}
 
 export interface StageState {
   stage: PipelineStage;
@@ -57,6 +103,7 @@ export interface UserStory {
   source_chunks?: string[];
   edited_at?: string;
   regeneration_needed?: boolean;
+  atomic_requirement_ids?: string[];
 }
 
 export interface Epic {
@@ -75,6 +122,7 @@ export interface FunctionalTest {
   test_steps: string[];
   expected_results: string[];
   source_chunks?: string[];
+  atomic_requirement_ids?: string[];
 }
 
 export interface GherkinScenario {
@@ -86,6 +134,7 @@ export interface GherkinScenario {
   when: string[];
   then: string[];
   source_chunks?: string[];
+  atomic_requirement_ids?: string[];
 }
 
 export interface EntityField {
@@ -115,6 +164,13 @@ export interface ValidationReport {
   timestamp: string;
 }
 
+export interface CoverageReport {
+  total: number;
+  covered_req_ids: string[];
+  uncovered_req_ids: string[];
+  coverage_pct: number;
+}
+
 export interface GapFix {
   gap_id: string;
   gap_description: string;
@@ -129,6 +185,8 @@ export interface GapFix {
 
 export interface GenerationResults {
   project_name?: string;
+  requirement_chunks: RequirementChunk[];
+  atomic_requirements: AtomicRequirement[];
   epics: Epic[];
   user_stories: UserStory[];
   functional_tests: FunctionalTest[];
@@ -148,3 +206,9 @@ export interface StatusResponse {
   results: GenerationResults;
   artefacts: ArtefactsConfig;
 }
+
+export type WorkspacePhase =
+  | 'generating_functional_tests'
+  | 'functional_tests_ready'
+  | 'generating_gherkin'
+  | 'complete';

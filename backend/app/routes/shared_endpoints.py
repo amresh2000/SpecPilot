@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from app.models import (
     GenerateRequest, StatusResponse, ArtefactsConfig, StepStatus, JobStatus,
     FunctionalTest, ValidationReport, GapFix, CTQScore, PipelineStage,
+    AtomicRequirementType, AtomicRequirementStatus, UpdateAtomicRequirementRequest,
     UpdateEpicRequest, UpdateStoryRequest, UpdateAcceptanceCriteriaRequest,
     UpdateFunctionalTestRequest, UpdateGherkinTestRequest, UpdateGapFixRequest, DeleteTestRequest
 )
@@ -63,6 +64,14 @@ async def download_results(job_id: str):
         # Create a temporary directory for organizing files
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
+
+            # Write requirement map
+            if job.results.requirement_chunks or job.results.atomic_requirements:
+                with open(temp_path / "requirement_map.json", 'w') as f:
+                    json.dump({
+                        "requirement_chunks": [rc.model_dump() for rc in job.results.requirement_chunks],
+                        "atomic_requirements": [ar.model_dump() for ar in job.results.atomic_requirements],
+                    }, f, indent=2, default=str)
 
             # Write EPICs and stories
             if job.results.epics or job.results.user_stories:
@@ -195,6 +204,99 @@ async def generate_more_tests(
     except Exception as e:
         log_error("Error generating more tests", error=e, job_id=job_id, story_id=story_id)
         raise HTTPException(status_code=500, detail="Failed to generate additional tests")
+
+
+@router.get("/requirement-map/{job_id}")
+async def get_requirement_map(job_id: str):
+    """Return requirement chunks and atomic requirements for the requirement map page"""
+    job = job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    return {
+        "requirement_chunks": [rc.model_dump() for rc in job.results.requirement_chunks],
+        "atomic_requirements": [ar.model_dump() for ar in job.results.atomic_requirements],
+    }
+
+
+@router.put("/atomic-requirement/{job_id}/{req_id}")
+async def update_atomic_requirement(job_id: str, req_id: str, request: UpdateAtomicRequirementRequest):
+    """Update an atomic requirement's text, type, or status"""
+    job = job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    for req in job.results.atomic_requirements:
+        if req.id == req_id:
+            if request.text is not None:
+                req.text = request.text
+            if request.type is not None:
+                req.type = request.type
+            if request.status is not None:
+                req.status = request.status
+            req.edited_at = datetime.now()
+            log_info("Atomic requirement updated", job_id=job_id, req_id=req_id)
+            return {"success": True, "req_id": req_id}
+
+    raise HTTPException(status_code=404, detail="Atomic requirement not found")
+
+
+@router.delete("/atomic-requirement/{job_id}/{req_id}")
+async def delete_atomic_requirement(job_id: str, req_id: str):
+    """Remove an atomic requirement and its reference from its parent chunk"""
+    job = job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    req_found = any(r.id == req_id for r in job.results.atomic_requirements)
+    if not req_found:
+        raise HTTPException(status_code=404, detail="Atomic requirement not found")
+
+    job.results.atomic_requirements = [r for r in job.results.atomic_requirements if r.id != req_id]
+
+    for chunk in job.results.requirement_chunks:
+        if req_id in chunk.atomic_requirement_ids:
+            chunk.atomic_requirement_ids = [rid for rid in chunk.atomic_requirement_ids if rid != req_id]
+
+    log_info("Atomic requirement deleted", job_id=job_id, req_id=req_id)
+    return {"success": True, "req_id": req_id}
+
+
+@router.get("/brd-chunks/{job_id}")
+async def get_brd_chunks(job_id: str):
+    """Return the raw parser chunks for the source panel in the requirement map page"""
+    job = job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    chunks = job.brd_data.get('chunks', []) if job.brd_data else []
+    tables = job.brd_data.get('tables', []) if job.brd_data else []
+    return {"chunks": chunks, "tables": tables}
+
+
+@router.get("/coverage/{job_id}")
+async def get_coverage(job_id: str):
+    """Return requirement coverage stats: how many atomic reqs are satisfied by at least one story"""
+    job = job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    all_req_ids = {req.id for req in job.results.atomic_requirements}
+    covered = set()
+    for story in job.results.user_stories:
+        if story.atomic_requirement_ids:
+            covered.update(story.atomic_requirement_ids)
+    covered = covered & all_req_ids  # guard against stale IDs
+    uncovered = all_req_ids - covered
+    total = len(all_req_ids)
+    pct = round(len(covered) / total * 100, 1) if total > 0 else 0.0
+
+    return {
+        "total": total,
+        "covered_req_ids": sorted(covered),
+        "uncovered_req_ids": sorted(uncovered),
+        "coverage_pct": pct,
+    }
 
 
 @router.post("/validate-brd")

@@ -1,12 +1,14 @@
 import asyncio
 import time
+from collections import defaultdict
 from typing import Dict, Any
 from app.services.job_manager import job_manager
 from app.services.brd_parser import BRDParser
 from app.services.llm_client import BedrockLLMClient
 from app.models import (
     JobStatus, StepStatus, Epic, UserStory, AcceptanceCriterion,
-    FunctionalTest, GherkinScenario, Entity, EntityField
+    FunctionalTest, GherkinScenario, Entity, EntityField,
+    AtomicRequirement, AtomicRequirementType, RequirementChunk
 )
 from app.utils import log_info, log_error, extract_applied_gap_fixes
 
@@ -44,6 +46,67 @@ class GenerationPipeline:
         except Exception as e:
             job.update_step("Parsing documents", StepStatus.FAILED)
             raise RuntimeError(f"Failed to parse BRD: {str(e)}")
+
+    async def _generate_requirement_map(self):
+        """Extract atomic requirements and semantic chunk metadata from parsed BRD chunks."""
+        job = job_manager.get_job(self.job_id)
+        start_time = time.time()
+
+        try:
+            job.update_step("Generating Requirement Map", StepStatus.RUNNING)
+
+            chunks = job.brd_data.get('chunks', []) if job.brd_data else []
+            if not chunks:
+                raise RuntimeError("No BRD chunks available for requirement map generation")
+
+            result = await asyncio.to_thread(
+                self.llm_client.generate_atomic_requirements,
+                chunks,
+                job_id=self.job_id
+            )
+
+            req_id_counter = 0
+            for chunk_data in result.get('requirement_chunks', []):
+                atomic_reqs = chunk_data.pop('atomic_requirements', [])
+
+                req_chunk = RequirementChunk(
+                    chunk_id=chunk_data['chunk_id'],
+                    title=chunk_data.get('title', chunk_data['chunk_id']),
+                    semantic_type=chunk_data.get('semantic_type', 'mixed'),
+                    summary=chunk_data.get('summary', ''),
+                    confidence=float(chunk_data.get('confidence', 0.8)),
+                    has_table=chunk_data.get('has_table', False),
+                    atomic_requirement_ids=[]
+                )
+
+                for req_data in atomic_reqs:
+                    req_id_counter += 1
+                    # Enforce globally unique IDs regardless of what LLM returned
+                    req_id = f"req_{req_id_counter}"
+                    req_type_raw = req_data.get('type', 'functional')
+                    try:
+                        req_type = AtomicRequirementType(req_type_raw)
+                    except ValueError:
+                        req_type = AtomicRequirementType.FUNCTIONAL
+
+                    req = AtomicRequirement(
+                        id=req_id,
+                        chunk_id=chunk_data['chunk_id'],
+                        text=req_data.get('text', ''),
+                        type=req_type,
+                        derived_from_table=req_data.get('derived_from_table', False)
+                    )
+                    job.results.atomic_requirements.append(req)
+                    req_chunk.atomic_requirement_ids.append(req_id)
+
+                job.results.requirement_chunks.append(req_chunk)
+
+            duration_ms = int((time.time() - start_time) * 1000)
+            job.update_step("Generating Requirement Map", StepStatus.COMPLETED, duration_ms)
+
+        except Exception as e:
+            job.update_step("Generating Requirement Map", StepStatus.FAILED)
+            raise RuntimeError(f"Failed to generate requirement map: {str(e)}")
 
     async def _generate_epics_and_stories(self):
         """Generate project name, EPICs (phase 1), then User Stories in batches (phase 2)."""
@@ -86,6 +149,7 @@ class GenerationPipeline:
                     job.instructions,
                     self.gap_fixes,
                     story_id_offset=story_id_offset,
+                    atomic_requirements=job.results.atomic_requirements,
                     job_id=self.job_id
                 )
 
@@ -107,8 +171,8 @@ class GenerationPipeline:
             raise RuntimeError(f"Failed to generate EPICs and stories: {str(e)}")
 
     async def _generate_functional_tests(self):
-        """Generate functional test cases in batches of 20 stories."""
-        STORY_BATCH_SIZE = 20
+        """Generate functional test cases grouped by epic, sub-batched at 8 stories per call."""
+        MAX_STORIES_PER_CALL = 8
 
         job = job_manager.get_job(self.job_id)
         start_time = time.time()
@@ -118,37 +182,45 @@ class GenerationPipeline:
 
             all_chunks = job.brd_data.get('chunks', []) if job.brd_data else []
 
-            # Collect chunk IDs referenced by stories/ACs
-            chunk_ids = set()
+            # Group stories by epic for semantic coherence and better chunk filtering
+            stories_by_epic = defaultdict(list)
             for story in job.results.user_stories:
-                if story.source_chunks:
-                    chunk_ids.update(story.source_chunks)
-                for ac in story.acceptance_criteria:
-                    if ac.source_chunks:
-                        chunk_ids.update(ac.source_chunks)
+                stories_by_epic[story.epic_id].append(story)
 
-            # If stories have no source_chunks tracking, fall back to all chunks
-            if chunk_ids:
-                brd_chunks = [c for c in all_chunks if c['id'] in chunk_ids]
-            else:
-                brd_chunks = all_chunks  # fallback: full BRD context
+            test_id_offset = 0
+            for epic_id, epic_stories in stories_by_epic.items():
+                for i in range(0, len(epic_stories), MAX_STORIES_PER_CALL):
+                    batch = epic_stories[i:i + MAX_STORIES_PER_CALL]
 
-            stories = job.results.user_stories
-            for i in range(0, len(stories), STORY_BATCH_SIZE):
-                batch = stories[i:i + STORY_BATCH_SIZE]
-                result = await asyncio.to_thread(
-                    self.llm_client.generate_functional_tests,
-                    batch,
-                    job.instructions,
-                    brd_chunks if brd_chunks else None,
-                    self.gap_fixes,
-                    job_id=self.job_id
-                )
+                    # Per-batch chunk filtering: only chunks referenced by this batch's stories/ACs
+                    batch_chunk_ids = set()
+                    for story in batch:
+                        if story.source_chunks:
+                            batch_chunk_ids.update(story.source_chunks)
+                        for ac in story.acceptance_criteria:
+                            if ac.source_chunks:
+                                batch_chunk_ids.update(ac.source_chunks)
 
-                batch_tests = result.get('functional_tests', [])
-                for test_data in batch_tests:
-                    test = FunctionalTest(**test_data)
-                    job.results.functional_tests.append(test)
+                    if batch_chunk_ids:
+                        batch_chunks = [c for c in all_chunks if c['id'] in batch_chunk_ids]
+                    else:
+                        batch_chunks = all_chunks  # fallback: full BRD context for this batch
+
+                    result = await asyncio.to_thread(
+                        self.llm_client.generate_functional_tests,
+                        batch,
+                        job.instructions,
+                        batch_chunks if batch_chunks else None,
+                        self.gap_fixes,
+                        job_id=self.job_id,
+                        test_id_offset=test_id_offset
+                    )
+
+                    batch_tests = result.get('functional_tests', [])
+                    for test_data in batch_tests:
+                        test = FunctionalTest(**test_data)
+                        job.results.functional_tests.append(test)
+                    test_id_offset += len(batch_tests)
 
             if not job.results.functional_tests:
                 raise RuntimeError(
@@ -164,33 +236,59 @@ class GenerationPipeline:
             raise RuntimeError(f"Failed to generate functional tests: {str(e)}")
 
     async def _generate_gherkin_tests(self):
-        """Generate Gherkin BDD scenarios"""
+        """Generate Gherkin BDD scenarios grouped by epic, sub-batched at 6 stories per call."""
+        MAX_STORIES_PER_CALL = 6
+
         job = job_manager.get_job(self.job_id)
         start_time = time.time()
 
         try:
             job.update_step("Generating Gherkin Tests", StepStatus.RUNNING)
 
-            # Reuse the same BRD chunks that were used for functional tests
             all_chunks = job.brd_data.get('chunks', []) if job.brd_data else []
-            chunk_ids = set()
+
+            # Group stories by epic for semantic coherence and better chunk filtering
+            stories_by_epic = defaultdict(list)
             for story in job.results.user_stories:
-                if story.source_chunks:
-                    chunk_ids.update(story.source_chunks)
-            brd_chunks = [c for c in all_chunks if c['id'] in chunk_ids] if chunk_ids else all_chunks
+                stories_by_epic[story.epic_id].append(story)
 
-            result = await asyncio.to_thread(
-                self.llm_client.generate_gherkin_tests,
-                job.results.user_stories,
-                job.results.functional_tests,
-                job.instructions,
-                brd_chunks if brd_chunks else None,
-                self.job_id
-            )
+            gherkin_id_offset = 0
+            for epic_id, epic_stories in stories_by_epic.items():
+                for i in range(0, len(epic_stories), MAX_STORIES_PER_CALL):
+                    batch = epic_stories[i:i + MAX_STORIES_PER_CALL]
 
-            for scenario_data in result.get('gherkin_tests', []):
-                scenario = GherkinScenario(**scenario_data)
-                job.results.gherkin_tests.append(scenario)
+                    # Per-batch chunk filtering: story-level source_chunks only
+                    batch_chunk_ids = set()
+                    for story in batch:
+                        if story.source_chunks:
+                            batch_chunk_ids.update(story.source_chunks)
+                    batch_chunks = (
+                        [c for c in all_chunks if c['id'] in batch_chunk_ids]
+                        if batch_chunk_ids else all_chunks
+                    )
+
+                    # Per-batch functional test filtering: only tests for this batch's stories
+                    batch_story_ids = {story.id for story in batch}
+                    batch_functional_tests = [
+                        ft for ft in job.results.functional_tests
+                        if ft.story_id in batch_story_ids
+                    ]
+
+                    result = await asyncio.to_thread(
+                        self.llm_client.generate_gherkin_tests,
+                        batch,
+                        batch_functional_tests if batch_functional_tests else None,
+                        job.instructions,
+                        batch_chunks if batch_chunks else None,
+                        job_id=self.job_id,
+                        gherkin_id_offset=gherkin_id_offset
+                    )
+
+                    batch_scenarios = result.get('gherkin_tests', [])
+                    for scenario_data in batch_scenarios:
+                        scenario = GherkinScenario(**scenario_data)
+                        job.results.gherkin_tests.append(scenario)
+                    gherkin_id_offset += len(batch_scenarios)
 
             if not job.results.gherkin_tests:
                 raise RuntimeError(

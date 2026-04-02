@@ -57,7 +57,7 @@ export const StoryDetailPanel: React.FC<StoryDetailPanelProps> = ({
   }
 
   const renderFunctionalTab = () => {
-    if (phase === 'generating_functional_tests') {
+    if (phase === 'generating_functional_tests' && functionalTests.length === 0) {
       return (
         <div className="flex items-center gap-2 text-sm text-neutral-500 py-6">
           <Loader2 className="w-4 h-4 animate-spin text-indigo-500" />
@@ -67,6 +67,12 @@ export const StoryDetailPanel: React.FC<StoryDetailPanelProps> = ({
     }
     return (
       <div className="space-y-4">
+        {phase === 'generating_functional_tests' && (
+          <div className="flex items-center gap-2 text-xs text-neutral-400">
+            <Loader2 className="w-3 h-3 animate-spin text-indigo-400" />
+            <span>More tests may still be generating…</span>
+          </div>
+        )}
         {functionalTests.length === 0 ? (
           <div className="py-8 text-center">
             <FlaskConical className="w-8 h-8 text-neutral-300 mx-auto mb-2" />
@@ -116,6 +122,12 @@ export const StoryDetailPanel: React.FC<StoryDetailPanelProps> = ({
     }
     return (
       <div className="space-y-4">
+        {phase === 'generating_gherkin' && (
+          <div className="flex items-center gap-2 text-xs text-neutral-400">
+            <Loader2 className="w-3 h-3 animate-spin text-indigo-400" />
+            <span>More scenarios may still be generating…</span>
+          </div>
+        )}
         {gherkinTests.length === 0 ? (
           <div className="py-8 text-center">
             <Code2 className="w-8 h-8 text-neutral-300 mx-auto mb-2" />

@@ -1,320 +1,299 @@
 import re
-import tempfile
-import os
 from typing import Dict, List, Any, Optional
 from docx import Document
 
 
+# Required section categories for parse_quality reporting.
+# Fuzzy-matched: any section title containing these keywords qualifies.
+_REQUIRED_SECTION_KEYWORDS = [
+    "project overview",
+    "business objective",
+    "functional requirement",
+    "non-functional requirement",
+]
+
+
+def _serialize_table_to_text(headers: List[str], rows: List[Dict]) -> str:
+    """Render a structured table as markdown text for inclusion in raw_text."""
+    if not headers:
+        return ""
+    lines = ["| " + " | ".join(headers) + " |"]
+    lines.append("|" + "|".join(["---"] * len(headers)) + "|")
+    for row in rows:
+        lines.append("| " + " | ".join(str(row.get(h, "")) for h in headers) + " |")
+    return "\n".join(lines)
+
+
 class BRDParser:
-    """Parse BRD documents (.docx and .txt) into structured format"""
+    """Parse BRD documents (.docx and .txt) into raw_text, sections, tables, and parse_quality."""
 
-    def __init__(self, s3_storage=None):
-        """
-        Initialize BRD Parser
+    def parse(self, file_path: str) -> Dict[str, Any]:
+        if file_path.endswith('.docx'):
+            return self._parse_docx(file_path)
+        elif file_path.endswith('.txt'):
+            return self._parse_txt(file_path)
+        else:
+            raise ValueError(f"Unsupported file format: {file_path}")
 
-        Args:
-            s3_storage: Optional S3Storage instance for S3-based parsing
-        """
-        self.s3_storage = s3_storage
+    # ─────────────────────────────────────────────────────────────
+    # .docx
+    # ─────────────────────────────────────────────────────────────
 
-    def _get_parent_section_id(self, section_id: str) -> Optional[str]:
-        """
-        Get parent section ID from a hierarchical section ID.
-
-        Examples:
-            "3.1.2" -> "3.1"
-            "3.1" -> "3"
-            "3" -> None
-
-        Args:
-            section_id: Section ID like "3.1.2"
-
-        Returns:
-            Parent section ID or None if root level
-        """
-        parts = section_id.split('.')
-        if len(parts) <= 1:
-            return None
-        return '.'.join(parts[:-1])
-
-    def _get_heading_level(self, section_id: str) -> int:
-        """
-        Get heading level from section ID.
-
-        Examples:
-            "3" -> 1
-            "3.1" -> 2
-            "3.1.2" -> 3
-
-        Args:
-            section_id: Section ID like "3.1.2"
-
-        Returns:
-            Heading level (depth in hierarchy)
-        """
-        return len(section_id.split('.'))
-
-    def parse_docx(self, file_path: str) -> Dict[str, Any]:
-        """Parse .docx file and extract sections, tables, and text"""
+    def _parse_docx(self, file_path: str) -> Dict[str, Any]:
         doc = Document(file_path)
-        sections = []
-        tables = []
-        raw_text = []
-        chunks = []
 
-        current_section = None
-        chunk_id = 0
-        section_paragraphs = []
+        # Build element → object maps so we can iterate body children in document order.
+        # This ensures tables appear in raw_text at the correct position (not after all paragraphs).
+        para_map = {p._p: p for p in doc.paragraphs}
+        table_map = {t._tbl: t for t in doc.tables}
 
-        # Extract paragraphs and sections
-        for para in doc.paragraphs:
-            text = para.text.strip()
-            if not text:
-                continue
+        raw_text_parts: List[str] = []
+        sections: List[Dict] = []
+        tables: List[Dict] = []
+        current_section: Optional[Dict] = None
+        table_counter = 0
 
-            raw_text.append(text)
+        for child in doc.element.body:
+            if child in para_map:
+                para = para_map[child]
+                text = para.text.strip()
+                if not text:
+                    continue
 
-            # Check if this is a heading
-            if para.style.name.startswith('Heading'):
-                # If we have a previous section with content, create its chunk
-                if current_section and section_paragraphs:
-                    chunk_id += 1
-                    section_content = "\n\n".join(section_paragraphs)
-                    chunk = {
-                        "id": f"chunk_{chunk_id}",
-                        "type": "section",
-                        "section_id": current_section["id"],
-                        "section_title": current_section["title"],
-                        "heading_level": self._get_heading_level(current_section["id"]),
-                        "parent_section_id": self._get_parent_section_id(current_section["id"]),
-                        "text": section_content
-                    }
-                    chunks.append(chunk)
-                    current_section["chunk_ids"].append(f"chunk_{chunk_id}")
-                    section_paragraphs = []
+                raw_text_parts.append(text)
+                heading_level = self._docx_heading_level(para)
 
-                # Extract section number if present
-                section_match = re.match(r'^(\d+(?:\.\d+)*)\s+(.*)', text)
-                if section_match:
-                    section_id = section_match.group(1)
-                    title = section_match.group(2)
+                if heading_level:
+                    if current_section:
+                        sections.append(current_section)
+                    current_section = {"title": text, "text": ""}
                 else:
-                    section_id = f"section_{len(sections) + 1}"
-                    title = text
+                    if current_section:
+                        current_section["text"] += text + "\n"
 
-                current_section = {
-                    "id": section_id,
-                    "title": title,
-                    "text": "",
-                    "chunk_ids": []
-                }
-                sections.append(current_section)
-            else:
-                # Regular paragraph - accumulate for section chunk
-                if current_section:
-                    current_section["text"] += text + "\n"
-                    section_paragraphs.append(text)
+            elif child in table_map:
+                table = table_map[child]
+                table_counter += 1
+                parsed = self._parse_docx_table(table, table_counter)
+                if parsed:
+                    table_text = _serialize_table_to_text(parsed["headers"], parsed["rows"])
+                    raw_text_parts.append(table_text)
+                    tables.append(parsed)
+                    if current_section:
+                        current_section["text"] += table_text + "\n"
 
-        # Create chunk for the final section if it has content
-        if current_section and section_paragraphs:
-            chunk_id += 1
-            section_content = "\n\n".join(section_paragraphs)
-            chunk = {
-                "id": f"chunk_{chunk_id}",
-                "type": "section",
-                "section_id": current_section["id"],
-                "section_title": current_section["title"],
-                "heading_level": self._get_heading_level(current_section["id"]),
-                "parent_section_id": self._get_parent_section_id(current_section["id"]),
-                "text": section_content
-            }
-            chunks.append(chunk)
-            current_section["chunk_ids"].append(f"chunk_{chunk_id}")
+        if current_section:
+            sections.append(current_section)
 
-        # Extract tables
-        for table_idx, table in enumerate(doc.tables):
-            if len(table.rows) < 2:
-                continue  # Skip tables without headers
-
-            # Extract headers from first row
-            headers = [cell.text.strip() for cell in table.rows[0].cells]
-
-            # Skip if headers are empty
-            if not any(headers):
-                continue
-
-            # Extract rows
-            rows = []
-            for row in table.rows[1:]:
-                row_data = {}
-                for idx, cell in enumerate(row.cells):
-                    if idx < len(headers) and headers[idx]:
-                        row_data[headers[idx]] = cell.text.strip()
-                if row_data:
-                    rows.append(row_data)
-
-            table_data = {
-                "table_id": f"table_{table_idx + 1}",
-                "section_id": current_section["id"] if current_section else None,
-                "headers": headers,
-                "rows": rows
-            }
-            tables.append(table_data)
-
-            # Create chunk for table with full data (not truncated)
-            chunk_id += 1
-            chunk_text = f"Table: {', '.join(headers)}\n"
-            for row in rows:  # Include ALL rows, not just first 3
-                chunk_text += str(row) + "\n"
-            chunks.append({
-                "id": f"chunk_{chunk_id}",
-                "type": "table",
-                "section_id": current_section["id"] if current_section else None,
-                "section_title": current_section["title"] if current_section else None,
-                "heading_level": self._get_heading_level(current_section["id"]) if current_section else None,
-                "parent_section_id": self._get_parent_section_id(current_section["id"]) if current_section else None,
-                "text": chunk_text,
-                "table_ref": table_data["table_id"]
-            })
+        sections = [s for s in sections if s["text"].strip()]
+        raw_text = "\n\n".join(raw_text_parts)
 
         return {
+            "raw_text": raw_text,
             "sections": sections,
             "tables": tables,
-            "raw_text": "\n".join(raw_text),
-            "chunks": chunks
+            "parse_quality": self._build_quality(raw_text, sections, tables),
         }
 
-    def parse_txt(self, file_path: str) -> Dict[str, Any]:
-        """Parse .txt file and extract sections using simple heuristics"""
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
+    def _docx_heading_level(self, para) -> Optional[int]:
+        """Return heading level (1–6) or None."""
+        style_name = para.style.name if para.style else ""
 
-        sections = []
-        chunks = []
-        current_section = None
-        chunk_id = 0
-        section_lines = []
+        # Primary: Word heading styles
+        if style_name.lower().startswith('heading'):
+            parts = style_name.split()
+            try:
+                return int(parts[-1])
+            except (ValueError, IndexError):
+                return 1
 
-        lines = content.split('\n')
+        # Fallback: short paragraph where every run with text is bold
+        text = para.text.strip()
+        if not text or len(text) > 120 or text[-1] in '.?!':
+            return None
 
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
+        runs_with_text = [r for r in para.runs if r.text.strip()]
+        if runs_with_text and all(r.bold for r in runs_with_text):
+            return 2  # treat bold-only paragraphs as H2
 
-            # Check if line is a section header (starts with numbers like 1., 1.1, 1.1.1)
-            section_match = re.match(r'^(\d+(?:\.\d+)*\.?)\s+(.*)', line)
+        return None
 
-            if section_match:
-                # If we have a previous section with content, create its chunk
-                if current_section and section_lines:
-                    chunk_id += 1
-                    section_content = "\n\n".join(section_lines)
-                    chunk = {
-                        "id": f"chunk_{chunk_id}",
-                        "type": "section",
-                        "section_id": current_section["id"],
-                        "section_title": current_section["title"],
-                        "heading_level": self._get_heading_level(current_section["id"]),
-                        "parent_section_id": self._get_parent_section_id(current_section["id"]),
-                        "text": section_content
-                    }
-                    chunks.append(chunk)
-                    current_section["chunk_ids"].append(f"chunk_{chunk_id}")
-                    section_lines = []
+    def _parse_docx_table(self, table, counter: int) -> Optional[Dict]:
+        """Extract headers and rows from a python-docx Table object."""
+        if len(table.rows) < 2:
+            return None
 
-                section_id = section_match.group(1).rstrip('.')
-                title = section_match.group(2)
-
-                current_section = {
-                    "id": section_id,
-                    "title": title,
-                    "text": "",
-                    "chunk_ids": []
-                }
-                sections.append(current_section)
+        # Extract headers from row 0, deduplicating merged cells
+        raw_headers = []
+        prev_cell = None
+        for cell in table.rows[0].cells:
+            if cell is prev_cell:
+                raw_headers.append("")  # merged — keep slot empty
             else:
-                # Regular content - accumulate for section chunk
-                if current_section:
-                    current_section["text"] += line + "\n"
-                    section_lines.append(line)
-                else:
-                    # Create a default section if none exists
-                    current_section = {
-                        "id": "intro",
-                        "title": "Introduction",
-                        "text": line + "\n",
-                        "chunk_ids": []
-                    }
-                    sections.append(current_section)
-                    section_lines.append(line)
+                raw_headers.append(cell.text.strip())
+            prev_cell = cell
 
-        # Create chunk for the final section if it has content
-        if current_section and section_lines:
-            chunk_id += 1
-            section_content = "\n\n".join(section_lines)
-            chunk = {
-                "id": f"chunk_{chunk_id}",
-                "type": "section",
-                "section_id": current_section["id"],
-                "section_title": current_section["title"],
-                "heading_level": self._get_heading_level(current_section["id"]),
-                "parent_section_id": self._get_parent_section_id(current_section["id"]),
-                "text": section_content
-            }
-            chunks.append(chunk)
-            current_section["chunk_ids"].append(f"chunk_{chunk_id}")
+        if not any(raw_headers):
+            return None
+
+        rows = []
+        for row in table.rows[1:]:
+            row_data = {}
+            prev_cell = None
+            for idx, cell in enumerate(row.cells):
+                if cell is prev_cell:
+                    idx += 1
+                    continue
+                prev_cell = cell
+                if idx < len(raw_headers) and raw_headers[idx]:
+                    row_data[raw_headers[idx]] = cell.text.strip()
+            if row_data:
+                rows.append(row_data)
+
+        headers = [h for h in raw_headers if h]
+        if not headers:
+            return None
 
         return {
-            "sections": sections,
-            "tables": [],  # txt files don't have tables
-            "raw_text": content,
-            "chunks": chunks
+            "table_id": f"table_{counter}",
+            "headers": headers,
+            "rows": rows,
         }
 
-    def parse(self, file_path_or_s3_key: str, is_s3: bool = False) -> Dict[str, Any]:
-        """
-        Main parse method that detects file type and calls appropriate parser
+    # ─────────────────────────────────────────────────────────────
+    # .txt
+    # ─────────────────────────────────────────────────────────────
 
-        Args:
-            file_path_or_s3_key: Local file path or S3 key
-            is_s3: True if file_path_or_s3_key is an S3 key, False for local file
+    def _parse_txt(self, file_path: str) -> Dict[str, Any]:
+        content = self._read_with_fallback(file_path)
+        lines = content.splitlines()
 
-        Returns:
-            Parsed BRD data
-        """
-        if is_s3:
-            if not self.s3_storage:
-                raise ValueError("S3Storage not configured but is_s3=True")
+        sections: List[Dict] = []
+        tables: List[Dict] = []
+        current_section: Optional[Dict] = None
+        table_counter = 0
+        i = 0
 
-            # Download file from S3 to temporary location
-            file_content = self.s3_storage.download_brd(file_path_or_s3_key)
+        while i < len(lines):
+            stripped = lines[i].strip()
 
-            # Determine file extension from S3 key
-            file_extension = os.path.splitext(file_path_or_s3_key)[1]
+            if not stripped:
+                i += 1
+                continue
 
-            # Create temporary file
-            with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
-                temp_file.write(file_content)
-                temp_path = temp_file.name
+            # Detect markdown table: header row followed by separator row (---|---|)
+            if (
+                '|' in stripped
+                and i + 1 < len(lines)
+                and re.match(r'^[\|\s\-:]+$', lines[i + 1].strip())
+            ):
+                table_lines = []
+                while i < len(lines) and '|' in lines[i]:
+                    table_lines.append(lines[i].strip())
+                    i += 1
+                parsed = self._parse_markdown_table(table_lines, table_counter + 1)
+                if parsed:
+                    table_counter += 1
+                    tables.append(parsed)
+                    table_text = _serialize_table_to_text(parsed["headers"], parsed["rows"])
+                    if current_section:
+                        current_section["text"] += table_text + "\n"
+                continue
 
-            try:
-                # Parse the temporary file
-                if file_extension == '.docx':
-                    return self.parse_docx(temp_path)
-                elif file_extension == '.txt':
-                    return self.parse_txt(temp_path)
-                else:
-                    raise ValueError(f"Unsupported file format: {file_extension}")
-            finally:
-                # Clean up temporary file
-                if os.path.exists(temp_path):
-                    os.unlink(temp_path)
-        else:
-            # Parse local file directly
-            if file_path_or_s3_key.endswith('.docx'):
-                return self.parse_docx(file_path_or_s3_key)
-            elif file_path_or_s3_key.endswith('.txt'):
-                return self.parse_txt(file_path_or_s3_key)
+            # Detect heading
+            heading_level = self._txt_heading_level(stripped)
+            if heading_level:
+                if current_section:
+                    sections.append(current_section)
+                current_section = {"title": stripped, "text": ""}
             else:
-                raise ValueError(f"Unsupported file format: {file_path_or_s3_key}")
+                if current_section:
+                    current_section["text"] += stripped + "\n"
+
+            i += 1
+
+        if current_section:
+            sections.append(current_section)
+
+        sections = [s for s in sections if s["text"].strip()]
+
+        return {
+            "raw_text": content,
+            "sections": sections,
+            "tables": tables,
+            "parse_quality": self._build_quality(content, sections, tables),
+        }
+
+    def _read_with_fallback(self, file_path: str) -> str:
+        """Read text file trying utf-8, utf-8-sig, then latin-1."""
+        for encoding in ('utf-8', 'utf-8-sig', 'latin-1'):
+            try:
+                with open(file_path, 'r', encoding=encoding) as f:
+                    return f.read()
+            except UnicodeDecodeError:
+                continue
+        raise ValueError(f"Could not decode {file_path}: unsupported encoding")
+
+    def _txt_heading_level(self, line: str) -> Optional[int]:
+        """
+        Detect headings in .txt files.
+        Primary signal: numbered sections (1., 1.1., 1.1.1.)
+        Fallback: markdown headings (#, ##, ###)
+        """
+        # Numbered: 1. Title, 1.1 Title, 1.1.1 Title
+        m = re.match(r'^(\d+(?:\.\d+)*\.?)\s+\S', line)
+        if m:
+            depth = m.group(1).rstrip('.').count('.') + 1
+            return min(depth, 3)
+
+        # Markdown: # H1, ## H2, ### H3
+        m = re.match(r'^(#{1,3})\s+\S', line)
+        if m:
+            return len(m.group(1))
+
+        return None
+
+    def _parse_markdown_table(self, lines: List[str], counter: int) -> Optional[Dict]:
+        """Parse markdown table lines into structured data."""
+        if len(lines) < 3:  # need header + separator + at least one row
+            return None
+
+        def split_row(line: str) -> List[str]:
+            return [cell.strip() for cell in line.strip().strip('|').split('|')]
+
+        headers = split_row(lines[0])
+        if not any(headers):
+            return None
+
+        rows = []
+        for line in lines[2:]:  # skip header + separator
+            cells = split_row(line)
+            row = {h: cells[i] for i, h in enumerate(headers) if h and i < len(cells)}
+            if row:
+                rows.append(row)
+
+        return {
+            "table_id": f"table_{counter}",
+            "headers": [h for h in headers if h],
+            "rows": rows,
+        }
+
+    # ─────────────────────────────────────────────────────────────
+    # Parse quality
+    # ─────────────────────────────────────────────────────────────
+
+    def _build_quality(
+        self, raw_text: str, sections: List[Dict], tables: List[Dict]
+    ) -> Dict:
+        titles_lower = [s["title"].lower() for s in sections]
+        missing = [
+            kw for kw in _REQUIRED_SECTION_KEYWORDS
+            if not any(kw in t for t in titles_lower)
+        ]
+        return {
+            "word_count": len(raw_text.split()),
+            "char_count": len(raw_text),
+            "section_count": len(sections),
+            "table_count": len(tables),
+            "missing_required_sections": missing,
+        }

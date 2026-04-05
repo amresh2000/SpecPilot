@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { useToast } from '@/components/ui/ToastContainer';
 import { api } from '@/lib/api';
-import { Upload, Loader2 } from 'lucide-react';
+import { Upload, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 
 export const ConfigurationPage: React.FC = () => {
   const navigate = useNavigate();
@@ -13,6 +13,7 @@ export const ConfigurationPage: React.FC = () => {
   const [instructions, setInstructions] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [guidelinesOpen, setGuidelinesOpen] = useState(false);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -78,7 +79,7 @@ export const ConfigurationPage: React.FC = () => {
       <div className="max-w-4xl mx-auto">
         <div className="mb-8">
           <h1 className="text-4xl font-bold text-gray-900 mb-2">Project Generator</h1>
-          <p className="text-gray-600">Transform your BRD into structured specifications and code</p>
+          <p className="text-gray-600">Transform your BRD into structured specifications</p>
         </div>
 
         <Card>
@@ -138,8 +139,60 @@ export const ConfigurationPage: React.FC = () => {
                 <li>Functional Tests</li>
                 <li>Gherkin BDD Scenarios</li>
                 <li>Data Model & Diagrams</li>
-                <li>Java Selenium + Cucumber Code Skeleton</li>
               </ul>
+            </div>
+
+            {/* BRD Guidelines */}
+            <div className="border border-amber-200 rounded-lg overflow-hidden">
+              <button
+                type="button"
+                className="w-full flex items-center justify-between px-4 py-3 bg-amber-50 hover:bg-amber-100 transition-colors text-left"
+                onClick={() => setGuidelinesOpen(o => !o)}
+              >
+                <span className="text-sm font-semibold text-amber-900">BRD Formatting Guidelines</span>
+                {guidelinesOpen
+                  ? <ChevronUp className="w-4 h-4 text-amber-700 shrink-0" />
+                  : <ChevronDown className="w-4 h-4 text-amber-700 shrink-0" />
+                }
+              </button>
+              {guidelinesOpen && (
+                <div className="px-4 py-3 bg-amber-50 border-t border-amber-200 space-y-3 text-sm text-amber-900">
+                  <p className="font-medium">Following these guidelines improves generation quality:</p>
+
+                  <div>
+                    <p className="font-semibold mb-1">Structure</p>
+                    <ul className="list-disc list-inside space-y-1 text-amber-800">
+                      <li><span className="font-medium">.docx:</span> Apply Word Heading styles (H1/H2/H3) — do not use bold text as headings</li>
+                      <li><span className="font-medium">.txt:</span> Use numbered sections — <code className="bg-amber-100 px-1 rounded">1.</code>, <code className="bg-amber-100 px-1 rounded">1.1.</code>, <code className="bg-amber-100 px-1 rounded">1.1.1.</code></li>
+                    </ul>
+                  </div>
+
+                  <div>
+                    <p className="font-semibold mb-1">Recommended sections</p>
+                    <ul className="list-disc list-inside space-y-1 text-amber-800">
+                      <li>Project Overview</li>
+                      <li>Business Objectives</li>
+                      <li>Functional Requirements</li>
+                      <li>Non-Functional Requirements</li>
+                    </ul>
+                  </div>
+
+                  <div>
+                    <p className="font-semibold mb-1">Tables</p>
+                    <ul className="list-disc list-inside space-y-1 text-amber-800">
+                      <li>First row must be column headers</li>
+                      <li>Put field constraints and validation rules in tables, not prose — the data model and test generation specifically pull from them</li>
+                    </ul>
+                  </div>
+
+                  <div>
+                    <p className="font-semibold mb-1">Content</p>
+                    <ul className="list-disc list-inside space-y-1 text-amber-800">
+                      <li>Keep paragraphs focused — one requirement or idea per paragraph</li>
+                    </ul>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Error Display */}

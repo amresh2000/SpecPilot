@@ -12,11 +12,7 @@ from app.utils import log_info, log_error, extract_applied_gap_fixes
 
 
 class GenerationPipeline:
-    """
-    Stage-by-stage generation orchestrator.
-
-    Methods are called by staged_endpoints.py for the staged workflow.
-    """
+    """Stage-by-stage generation orchestrator."""
 
     def __init__(self, job_id: str, file_path: str):
         self.job_id = job_id
@@ -28,33 +24,26 @@ class GenerationPipeline:
         self.gap_fixes = extract_applied_gap_fixes(job.results.gap_fixes if job and job.results else [])
 
     async def _parse_brd(self):
-        """Parse the BRD document"""
         job = job_manager.get_job(self.job_id)
         start_time = time.time()
-
         try:
             job.update_step("Parsing documents", StepStatus.RUNNING)
-
             brd_data = self.parser.parse(self.file_path)
             job.brd_data = brd_data
-
             duration_ms = int((time.time() - start_time) * 1000)
             job.update_step("Parsing documents", StepStatus.COMPLETED, duration_ms)
-
         except Exception as e:
             job.update_step("Parsing documents", StepStatus.FAILED)
             raise RuntimeError(f"Failed to parse BRD: {str(e)}")
 
     async def _generate_epics_and_stories(self):
-        """Generate project name, EPICs (phase 1), then User Stories in batches (phase 2)."""
-        EPIC_BATCH_SIZE = 5  # Generate stories for 5 epics per LLM call to stay within output budget
-
+        """BRD → project name + epics + user stories in one call."""
         job = job_manager.get_job(self.job_id)
         start_time = time.time()
-        job.update_step("Generating project name", StepStatus.RUNNING)
 
         try:
-            # Phase 1: Generate project name + epics only
+            job.update_step("Generating EPICs & User Stories", StepStatus.RUNNING)
+
             result = await asyncio.to_thread(
                 self.llm_client.generate_epics_and_stories,
                 job.brd_data,
@@ -65,96 +54,43 @@ class GenerationPipeline:
 
             job.results.project_name = result.get('project_name', 'Untitled Project')
 
-            epics_data = result.get('epics', [])
-            for epic_data in epics_data:
-                epic = Epic(**epic_data)
-                job.results.epics.append(epic)
+            for epic_data in result.get('epics', []):
+                job.results.epics.append(Epic(**epic_data))
+
+            for story_data in result.get('user_stories', []):
+                acs = [AcceptanceCriterion(**ac) for ac in story_data.get('acceptance_criteria', [])]
+                story_data['acceptance_criteria'] = acs
+                job.results.user_stories.append(UserStory(**story_data))
 
             duration_ms = int((time.time() - start_time) * 1000)
-            job.update_step("Generating project name", StepStatus.COMPLETED, duration_ms)
-
-            # Phase 2: Generate user stories in batches of EPIC_BATCH_SIZE
-            job.update_step("Generating EPICs & User Stories", StepStatus.RUNNING)
-            story_id_offset = 0
-
-            for i in range(0, len(epics_data), EPIC_BATCH_SIZE):
-                epic_batch = epics_data[i:i + EPIC_BATCH_SIZE]
-                batch_result = await asyncio.to_thread(
-                    self.llm_client.generate_user_stories_for_epics,
-                    epic_batch,
-                    job.brd_data,
-                    job.instructions,
-                    self.gap_fixes,
-                    story_id_offset=story_id_offset,
-                    job_id=self.job_id
-                )
-
-                for story_data in batch_result.get('user_stories', []):
-                    acs = []
-                    for ac_data in story_data.get('acceptance_criteria', []):
-                        ac = AcceptanceCriterion(**ac_data)
-                        acs.append(ac)
-                    story_data['acceptance_criteria'] = acs
-                    story = UserStory(**story_data)
-                    job.results.user_stories.append(story)
-
-                story_id_offset += len(batch_result.get('user_stories', []))
-
-            job.update_step("Generating EPICs & User Stories", StepStatus.COMPLETED, 0)
+            job.update_step("Generating EPICs & User Stories", StepStatus.COMPLETED, duration_ms)
 
         except Exception as e:
-            job.update_step("Generating project name", StepStatus.FAILED)
+            job.update_step("Generating EPICs & User Stories", StepStatus.FAILED)
             raise RuntimeError(f"Failed to generate EPICs and stories: {str(e)}")
 
     async def _generate_functional_tests(self):
-        """Generate functional test cases in batches of 20 stories."""
-        STORY_BATCH_SIZE = 20
-
+        """User stories + BRD tables → functional tests."""
         job = job_manager.get_job(self.job_id)
         start_time = time.time()
 
         try:
             job.update_step("Generating Functional Tests", StepStatus.RUNNING)
 
-            all_chunks = job.brd_data.get('chunks', []) if job.brd_data else []
+            result = await asyncio.to_thread(
+                self.llm_client.generate_functional_tests,
+                job.results.user_stories,
+                job.instructions,
+                job.brd_data,
+                self.gap_fixes,
+                job_id=self.job_id
+            )
 
-            # Collect chunk IDs referenced by stories/ACs
-            chunk_ids = set()
-            for story in job.results.user_stories:
-                if story.source_chunks:
-                    chunk_ids.update(story.source_chunks)
-                for ac in story.acceptance_criteria:
-                    if ac.source_chunks:
-                        chunk_ids.update(ac.source_chunks)
-
-            # If stories have no source_chunks tracking, fall back to all chunks
-            if chunk_ids:
-                brd_chunks = [c for c in all_chunks if c['id'] in chunk_ids]
-            else:
-                brd_chunks = all_chunks  # fallback: full BRD context
-
-            stories = job.results.user_stories
-            for i in range(0, len(stories), STORY_BATCH_SIZE):
-                batch = stories[i:i + STORY_BATCH_SIZE]
-                result = await asyncio.to_thread(
-                    self.llm_client.generate_functional_tests,
-                    batch,
-                    job.instructions,
-                    brd_chunks if brd_chunks else None,
-                    self.gap_fixes,
-                    job_id=self.job_id
-                )
-
-                batch_tests = result.get('functional_tests', [])
-                for test_data in batch_tests:
-                    test = FunctionalTest(**test_data)
-                    job.results.functional_tests.append(test)
+            for test_data in result.get('functional_tests', []):
+                job.results.functional_tests.append(FunctionalTest(**test_data))
 
             if not job.results.functional_tests:
-                raise RuntimeError(
-                    "LLM returned 0 functional tests across all story batches. "
-                    "Enable LOG_LLM_RESPONSES=true and check logs/llm_responses for the raw response."
-                )
+                raise RuntimeError("LLM returned 0 functional tests.")
 
             duration_ms = int((time.time() - start_time) * 1000)
             job.update_step("Generating Functional Tests", StepStatus.COMPLETED, duration_ms)
@@ -164,39 +100,26 @@ class GenerationPipeline:
             raise RuntimeError(f"Failed to generate functional tests: {str(e)}")
 
     async def _generate_gherkin_tests(self):
-        """Generate Gherkin BDD scenarios"""
+        """User stories + functional tests → Gherkin BDD scenarios."""
         job = job_manager.get_job(self.job_id)
         start_time = time.time()
 
         try:
             job.update_step("Generating Gherkin Tests", StepStatus.RUNNING)
 
-            # Reuse the same BRD chunks that were used for functional tests
-            all_chunks = job.brd_data.get('chunks', []) if job.brd_data else []
-            chunk_ids = set()
-            for story in job.results.user_stories:
-                if story.source_chunks:
-                    chunk_ids.update(story.source_chunks)
-            brd_chunks = [c for c in all_chunks if c['id'] in chunk_ids] if chunk_ids else all_chunks
-
             result = await asyncio.to_thread(
                 self.llm_client.generate_gherkin_tests,
                 job.results.user_stories,
                 job.results.functional_tests,
                 job.instructions,
-                brd_chunks if brd_chunks else None,
                 self.job_id
             )
 
             for scenario_data in result.get('gherkin_tests', []):
-                scenario = GherkinScenario(**scenario_data)
-                job.results.gherkin_tests.append(scenario)
+                job.results.gherkin_tests.append(GherkinScenario(**scenario_data))
 
             if not job.results.gherkin_tests:
-                raise RuntimeError(
-                    "LLM returned 0 Gherkin scenarios. "
-                    "Enable LOG_LLM_RESPONSES=true and check logs/llm_responses for the raw response."
-                )
+                raise RuntimeError("LLM returned 0 Gherkin scenarios.")
 
             duration_ms = int((time.time() - start_time) * 1000)
             job.update_step("Generating Gherkin Tests", StepStatus.COMPLETED, duration_ms)
@@ -206,7 +129,7 @@ class GenerationPipeline:
             raise RuntimeError(f"Failed to generate Gherkin tests: {str(e)}")
 
     async def _generate_data_model(self):
-        """Generate entities and Mermaid diagram"""
+        """BRD tables + section summaries + stories → entities + Mermaid diagram."""
         job = job_manager.get_job(self.job_id)
         start_time = time.time()
 
@@ -222,14 +145,9 @@ class GenerationPipeline:
             )
 
             for entity_data in result.get('entities', []):
-                fields = []
-                for field_data in entity_data.get('fields', []):
-                    field = EntityField(**field_data)
-                    fields.append(field)
-
+                fields = [EntityField(**f) for f in entity_data.get('fields', [])]
                 entity_data['fields'] = fields
-                entity = Entity(**entity_data)
-                job.results.entities.append(entity)
+                job.results.entities.append(Entity(**entity_data))
 
             job.results.mermaid = result.get('mermaid', '')
 
@@ -239,4 +157,3 @@ class GenerationPipeline:
         except Exception as e:
             job.update_step("Generating Data Model", StepStatus.FAILED)
             raise RuntimeError(f"Failed to generate data model: {str(e)}")
-

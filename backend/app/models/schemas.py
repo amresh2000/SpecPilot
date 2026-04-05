@@ -43,7 +43,6 @@ class Step(BaseModel):
 class AcceptanceCriterion(BaseModel):
     id: str
     text: str
-    source_chunks: Optional[List[str]] = None
 
 
 class UserStory(BaseModel):
@@ -54,7 +53,6 @@ class UserStory(BaseModel):
     goal: str
     benefit: str
     acceptance_criteria: List[AcceptanceCriterion]
-    source_chunks: Optional[List[str]] = None
     edited_at: Optional[datetime] = None
     regeneration_needed: bool = False
 
@@ -74,7 +72,6 @@ class FunctionalTest(BaseModel):
     preconditions: List[str]
     test_steps: List[str]
     expected_results: List[str]
-    source_chunks: Optional[List[str]] = None
     regenerated_at: Optional[datetime] = None
 
 
@@ -86,7 +83,6 @@ class GherkinScenario(BaseModel):
     given: List[str]
     when: List[str]
     then: List[str]
-    source_chunks: Optional[List[str]] = None
     regenerated_at: Optional[datetime] = None
 
 

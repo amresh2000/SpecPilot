@@ -23,6 +23,7 @@ class Job:
         self.results = GenerationResults()
         self.brd_data: Optional[Dict] = None
         self.uploaded_filename: Optional[str] = None
+        self.job_dir: Optional[str] = None
         # Staged pipeline fields
         self.current_stage: Optional[PipelineStage] = None
         self.stage_history: List[StageState] = []
@@ -82,10 +83,6 @@ class JobManager:
 
     def get_job(self, job_id: str) -> Optional[Job]:
         return self.jobs.get(job_id)
-
-    def update_job_status(self, job_id: str, status: JobStatus):
-        if job_id in self.jobs:
-            self.jobs[job_id].status = status
 
 
 # Global job manager instance
